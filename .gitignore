@@ -1,0 +1,18 @@
+# Build output
+backend/target/
+frontend/dist/
+frontend/node_modules/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Local overrides — never commit real secrets
+.env
+.env.local
+backend/src/main/resources/application-secret.yml

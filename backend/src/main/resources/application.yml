@@ -1,0 +1,90 @@
+spring:
+  application:
+    name: cinema-booking
+
+  autoconfigure:
+    # Auth is entirely JWT-driven (see SecurityConfig), so there is no UserDetailsService bean.
+    # Without this exclusion Boot helpfully creates an in-memory user and logs a generated
+    # password at every startup — an account that nothing in the filter chain can even use.
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3307}/${DB_NAME:cinema}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${DB_USER:cinema}
+    password: ${DB_PASSWORD:cinema}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: cinema-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+      data-source-properties:
+        # Server-side prepared statement caching, per TECH.md §3a.
+        useServerPrepStmts: true
+        cachePrepStmts: true
+        prepStmtCacheSize: 250
+        prepStmtCacheSqlLimit: 2048
+        rewriteBatchedStatements: true
+
+  jpa:
+    hibernate:
+      # Flyway owns the schema. Hibernate only checks the entities still match it.
+      ddl-auto: validate
+    # Forces the service layer to fetch what it needs instead of lazy-loading in a controller.
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          batch_size: 30
+        order_inserts: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+  api-docs:
+    path: /v3/api-docs
+
+app:
+  seat-hold:
+    # TECH.md §5: holds live in Redis with a TTL and auto-expire back to available.
+    ttl-seconds: 300
+  jwt:
+    issuer: lumen-cinema
+    access-token-ttl-minutes: 15
+    refresh-token-ttl-days: 14
+    # Dev-only default. Override with the JWT_SECRET env var anywhere that matters.
+    secret: ${JWT_SECRET:dev-only-secret-please-override-with-at-least-256-bits-of-entropy}
+
+logging:
+  level:
+    com.cinema: DEBUG

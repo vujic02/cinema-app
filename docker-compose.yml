@@ -1,0 +1,61 @@
+# Local development infrastructure.
+#
+# Part 1 runs only the stateful services here; the backend runs from the IDE / `mvnw
+# spring-boot:run` against them so restarts are instant. The `backend` and `frontend`
+# services join this file in Part 10, alongside docker-compose.prod.yml.
+#
+#   docker compose up -d          # start mysql + redis
+#   docker compose down           # stop, keep data
+#   docker compose down -v        # stop and wipe data (forces a clean Flyway run)
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: cinema-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: cinema
+      MYSQL_USER: cinema
+      MYSQL_PASSWORD: cinema
+    ports:
+      # 3307 on the host so this never fights a locally installed MySQL on 3306.
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ucinema", "-pcinema"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: cinema-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    # Seat holds are TTL keys (TECH.md §5). `notify-keyspace-events Ex` makes Redis publish
+    # __keyevent@0__:expired when a hold lapses — Part 4 listens on that to flip the seat back
+    # to available and broadcast it. Persistence is on so a restart mid-demo keeps live holds.
+    command:
+      - redis-server
+      - --notify-keyspace-events
+      - Ex
+      - --appendonly
+      - "yes"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mysql-data:
+  redis-data:

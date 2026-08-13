@@ -1,0 +1,24 @@
+# Datasource is supplied by the Testcontainers @ServiceConnection in AbstractIntegrationTest,
+# so nothing here points at a real host.
+spring:
+  jpa:
+    hibernate:
+      # Same contract as production: Flyway owns the schema, Hibernate only checks it matches.
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+app:
+  jwt:
+    issuer: lumen-cinema
+    access-token-ttl-minutes: 15
+    refresh-token-ttl-days: 14
+    # Must be at least 256 bits for HS256 or JwtService fails at construction.
+    secret: test-only-signing-secret-with-plenty-of-entropy-for-hmac-sha256
+
+logging:
+  level:
+    com.cinema: INFO
+    org.hibernate.SQL: WARN
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN
