@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * The single source of truth for the palette. Every colour token in tailwind.config.ts reads
+ * from here, so a theme is defined once and the markup never repeats itself with `dark:`.
+ *
+ * Values are space-separated RGB channels rather than hex, which is what lets Tailwind compose
+ * them with an alpha modifier (`bg-accent/70`).
+ *
+ * These are the handoff README's tokens, unchanged — zinc surfaces, teal accent, red reserved,
+ * emerald selected — just named by the job they do.
+ */
+@layer base {
+  :root {
+    --page: 255 255 255;
+    --surface: 250 250 250; /* zinc-50 */
+    --raised: 255 255 255; /* white */
+    --sunken: 228 228 231; /* zinc-200 */
+    --elevated: 255 255 255; /* white */
+    --line: 228 228 231; /* zinc-200 */
+    --line-strong: 212 212 216; /* zinc-300 */
+    --ink: 24 24 27; /* zinc-900 */
+    --muted: 113 113 122; /* zinc-500 */
+    --disabled: 161 161 170; /* zinc-400 */
+
+    --accent: 20 184 166; /* teal-500 */
+    --accent-ink: 9 9 11; /* zinc-950 */
+    --accent-text: 13 148 136; /* teal-600 */
+
+    --ok: 16 185 129; /* emerald-500 */
+    --ok-ink: 2 44 34; /* emerald-950 */
+
+    /* README: "seat available: white/zinc-100 with border". The handoff shipped zinc-200 in
+       light and zinc-100 in dark, which is neither, and made an available seat read as greyed
+       out. The border is what separates a seat from the surface, in both themes. */
+    --seat-available: 255 255 255;
+    --seat-reserved: 239 68 68; /* red-500 */
+    --seat-selected: 16 185 129; /* emerald-500 */
+    --seat-ink: 24 24 27; /* zinc-900 */
+  }
+
+  .dark {
+    --page: 9 9 11; /* zinc-950 */
+    --surface: 24 24 27; /* zinc-900 */
+    --raised: 39 39 42; /* zinc-800 */
+    --sunken: 39 39 42; /* zinc-800 */
+    --elevated: 63 63 70; /* zinc-700 */
+    --line: 39 39 42; /* zinc-800 */
+    --line-strong: 63 63 70; /* zinc-700 */
+    --ink: 250 250 250; /* zinc-50 */
+    --muted: 161 161 170; /* zinc-400 */
+    --disabled: 82 82 91; /* zinc-600 */
+
+    --accent: 20 184 166;
+    --accent-ink: 9 9 11;
+    --accent-text: 45 212 191; /* teal-400 */
+
+    --ok: 16 185 129;
+    --ok-ink: 2 44 34;
+
+    /* A seat stays light in dark mode — a cinema seat map reads as pale seats on a dark
+       auditorium, and the seat number needs a light background to sit on either way. */
+    --seat-available: 244 244 245; /* zinc-100 */
+    --seat-reserved: 239 68 68;
+    --seat-selected: 16 185 129;
+    --seat-ink: 24 24 27;
+  }
+
+  body {
+    @apply bg-page text-ink;
+  }
+}
+
+@layer components {
+  /**
+   * Stand-in for the real QR code (Part 7 swaps in qrcode.react keyed by the booking ref).
+   * Lives here rather than inline because the handoff expressed it as a pair of enormous
+   * arbitrary `bg-[repeating-linear-gradient(...)]` values, one per theme.
+   */
+  .qr-placeholder {
+    background-image: repeating-linear-gradient(
+      45deg,
+      rgb(var(--sunken)) 0,
+      rgb(var(--sunken)) 6px,
+      rgb(var(--line-strong)) 6px,
+      rgb(var(--line-strong)) 12px
+    );
+  }
+}

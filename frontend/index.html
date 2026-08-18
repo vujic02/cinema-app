@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lumen Cinema</title>
+    <script>
+      // Applied before first paint. ThemeContext sets the same class on mount, but React
+      // mounts after the browser has already painted, so without this a dark-mode user gets
+      // a white flash on every page load.
+      (function () {
+        var stored = localStorage.getItem('theme');
+        document.documentElement.classList.toggle('dark', (stored || 'dark') === 'dark');
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

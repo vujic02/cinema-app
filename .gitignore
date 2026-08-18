@@ -2,6 +2,7 @@
 backend/target/
 frontend/dist/
 frontend/node_modules/
+*.tsbuildinfo
 
 # IDE
 .idea/

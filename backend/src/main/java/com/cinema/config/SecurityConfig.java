@@ -37,7 +37,12 @@ public class SecurityConfig {
             "/v3/api-docs/**",
             // /swagger-ui.html only redirects; the page itself lives under /swagger-ui/.
             "/swagger-ui.html",
-            "/swagger-ui/**"
+            "/swagger-ui/**",
+            // SockJS handshake and its /info negotiation. Subscribing to
+            // /topic/showings/{id} needs no account because the topic carries nothing
+            // user-specific — a seat id and a status, never who holds it (see SeatStatusEvent).
+            // Placing a hold still requires a token; that goes over REST.
+            "/ws/**"
     };
 
     /** Catalogue reads (Part 3). Public per the TECH.md customer flow: browse, then log in to book. */

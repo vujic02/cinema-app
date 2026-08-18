@@ -3,6 +3,7 @@ package com.cinema.common.exception;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -45,6 +46,23 @@ public class GlobalExceptionHandler {
         log.warn("Data integrity violation on {}: {}", request.getRequestURI(), ex.getMostSpecificCause().getMessage());
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiError.of("CONFLICT", "That action conflicts with existing data", request.getRequestURI()));
+    }
+
+    /**
+     * Redis is where live seat holds live (TECH.md §5), so if it is unreachable the honest answer
+     * is "try again", not a 500. Browsing and checkout keep working: the seat map degrades to
+     * sold-vs-available from MySQL, and {@code uq_bookings_showing_seat} still makes a double
+     * sale impossible — the hold layer is what stops two people <em>trying</em>, not what stops
+     * them succeeding.
+     */
+    @ExceptionHandler(RedisConnectionFailureException.class)
+    public ResponseEntity<ApiError> handleRedisDown(RedisConnectionFailureException ex,
+                                                    HttpServletRequest request) {
+        log.error("Redis unavailable on {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiError.of("SEAT_HOLDS_UNAVAILABLE",
+                        "Seat holds are temporarily unavailable. Please try again in a moment.",
+                        request.getRequestURI()));
     }
 
     @ExceptionHandler(AccessDeniedException.class)

@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface SeatRepository extends JpaRepository<Seat, Long> {
 
@@ -23,4 +24,17 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     List<Seat> findVenueSeats(@Param("venueId") Long venueId);
 
     long countByRowVenueId(Long venueId);
+
+    /**
+     * One seat, but only if it belongs to the given venue. Seat ids are global rather than
+     * per-showing, so the seat-hold endpoints have to prove the seat is actually in the
+     * auditorium the showing runs in; the fetch join returns the row alongside, which is what
+     * {@link Seat#label()} needs to name the seat in an error message.
+     */
+    @Query("""
+            select s from Seat s
+              join fetch s.row r
+            where s.id = :seatId and r.venue.id = :venueId
+            """)
+    Optional<Seat> findInVenue(@Param("seatId") Long seatId, @Param("venueId") Long venueId);
 }

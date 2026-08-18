@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  // One project rather than the template's src/node split. The split exists so the Vite config
+  // can be compiled with Node types under `composite`, and composite forbids `noEmit` — which
+  // this project needs, since Vite does the emitting and tsc is only ever a checker here.
+  // Neither config file touches a Node global, so they type-check fine in the same program.
+  "include": ["src", "vite.config.ts", "tailwind.config.ts"]
+}

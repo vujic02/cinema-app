@@ -11,6 +11,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -42,15 +43,31 @@ public abstract class AbstractIntegrationTest {
 
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>(DockerImageName.parse("mysql:8.4"));
 
+    /**
+     * Redis is no longer optional for the suite: Part 4 put seat holds in it, and the expiry
+     * listener opens a subscription during context startup, so every context needs one.
+     * <p>
+     * {@code --notify-keyspace-events Ex} mirrors docker-compose.yml. Without it the server
+     * accepts the TTL but publishes nothing when it fires, and the expiry test would hang
+     * waiting for a broadcast that is never sent.
+     */
+    @SuppressWarnings("resource") // Same singleton-container pattern as MYSQL; Ryuk reaps it.
+    static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+            .withExposedPorts(6379)
+            .withCommand("redis-server", "--notify-keyspace-events", "Ex");
+
     static {
         MYSQL.start();
+        REDIS.start();
     }
 
     @DynamicPropertySource
-    static void datasourceProperties(DynamicPropertyRegistry registry) {
+    static void containerProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.data.redis.host", REDIS::getHost);
+        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
     }
 
     @Autowired

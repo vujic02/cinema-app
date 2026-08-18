@@ -1,7 +1,8 @@
 # Cinema Seat Booking — Execution Plan
 
-Source of truth: `TECH.md`. UI source: `design_handoff_movie_booking/` (customer flow only —
-admin screens do not exist yet and get designed from the same Tailwind tokens).
+Source of truth: `TECH.md`. UI source: the design handoff, which lives at `/frontend` (customer
+flow only — admin screens do not exist yet and get designed from the same Tailwind tokens,
+now defined as real theme tokens in `frontend/tailwind.config.ts`).
 
 **Decisions locked:**
 - Build order: **backend-first**. Seat-hold concurrency is the flagship feature; the API contract
@@ -66,6 +67,13 @@ cd backend && ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 
 Seeded logins (demo only): `admin@lumen.test` / `admin123`,
 `customer@lumen.test` / `password123`, `sam@lumen.test` / `password123`.
+
+Seat holds land in Redis, so they are inspectable by hand while the app runs:
+
+```
+docker exec -it cinema-redis redis-cli --scan --pattern 'hold:*'
+docker exec -it cinema-redis redis-cli ttl hold:1:3
+```
 
 ## Part 2 — Auth (JWT + refresh tokens) ✅ DONE
 
@@ -216,48 +224,186 @@ and config keys all existed and were Flyway-validated. Part 2 added everything t
   Replaced with the singleton-container pattern (`static { MYSQL.start(); }` +
   `@DynamicPropertySource`), which also cut the suite runtime.
 
-## Part 4 — Seat map + hold concurrency ⚑ flagship
+## Part 4 — Seat map + hold concurrency ⚑ flagship ✅ DONE
 
 The feature TECH.md §5 says to treat as most important. Gets its own part and its own tests.
 
-- [ ] `GET /api/showings/{id}/seat-map` — single fetch-join JPQL query returning seats +
-      current status, no N+1 (TECH.md §3a tier 2)
-- [ ] Redis hold: `SET hold:{showingId}:{seatId} {userId} NX EX 300` — `NX` is what makes the
-      race safe; the loser of a tie gets a rejection, not a second hold
-- [ ] `POST /api/showings/{id}/seats/{seatId}/hold` and `DELETE` to release
-- [ ] Redis keyspace-expiry listener → seat reverts to `available` on TTL, broadcast the change
-- [ ] STOMP/SockJS: `/topic/showings/{id}` broadcasting `{ seatId, status }` on hold, release,
-      expiry, and sale
-- [ ] MySQL `UNIQUE (showing_id, seat_id)` as the backstop if Redis is ever unavailable
-- [ ] **Tests:** concurrent hold test — N threads race for one seat, assert exactly one wins;
-      TTL expiry reverts status; a user cannot hold a sold seat
+Everything lives in a new `com.cinema.seat` package — the feature spans venue seats, showings
+and bookings without belonging to any of them, and Part 5's checkout consumes it from outside.
+
+- [x] `GET /api/showings/{id}/seat-map` — one JPQL query for the whole map, no N+1
+      (TECH.md §3a tier 2)
+      - `seat/repository/SeatMapRepository` — a constructor expression into `SeatMapEntry`, so
+        no entities are hydrated. A `left join Booking b on …` entity join carries the sold
+        flag; `Seat` has no association to `Booking` and giving it one would hang every ticket
+        ever sold off the seat
+      - two round trips per request in total: this, plus the existing
+        `findWithMovieAndVenueById` for the header the page needs anyway
+      - readable anonymously (catalogue GETs are public); with a token, seats the caller holds
+        come back flagged `heldByYou`
+- [x] Redis hold: `SET hold:{showingId}:{seatId} {userId} NX EX 300`
+      - `seat/service/SeatHoldStore` — the only class that speaks Redis. `NX` is a single
+        command and Redis runs commands one at a time, so there is no read-then-write window
+        for the loser to slip into
+      - release is a **Lua compare-and-delete**, not `DEL`: between reading the holder and
+        deleting, the hold can lapse and another user can take the seat — a plain delete would
+        then throw away a stranger's hold
+      - reading the holds on a showing uses `SCAN`, never `KEYS`. `KEYS` blocks the whole server
+        for its pass, including the `SET NX` the race depends on
+- [x] `POST /api/showings/{id}/seats/{seatId}/hold` and `DELETE` to release
+      - `409 SEAT_HELD` / `409 SEAT_SOLD` / `400 SEAT_NOT_IN_SHOWING` / `409 SHOWING_STARTED`
+      - re-holding a seat you already hold succeeds and returns the time **left**, without
+        extending it — refreshing on every click would let one user sit on a seat forever
+      - release is idempotent (204 when there was nothing to release), because the frontend
+        releases on navigate-away and that routinely happens after the TTL has fired.
+        `409 HOLD_NOT_YOURS` if the seat belongs to somebody else
+- [x] Redis keyspace-expiry listener → seat reverts to `available` on TTL, broadcast the change
+      - `seat/event/SeatHoldExpiryListener` on `__keyevent@*__:expired`; both ids are encoded in
+        the key because the expiry message carries the key name and nothing else
+      - checks `bookings.existsByShowingIdAndSeatId` before announcing: a sale racing the TTL
+        would otherwise tell the room a sold seat is free
+- [x] STOMP/SockJS: `/topic/showings/{id}` broadcasting `{ showingId, seatId, status }` on hold,
+      release and expiry — sale joins in Part 5
+      - `config/WebSocketConfig` (`/ws` endpoint, simple in-memory broker), `/ws/**` permitted in
+        `SecurityConfig`
+      - the topic carries **no user id**. It is readable by anyone watching the showing, so
+        "who holds it" is not broadcastable; that stays on the authenticated REST read
+- [x] MySQL `UNIQUE (showing_id, seat_id)` as the backstop if Redis is ever unavailable
+      - Part 4 writes no bookings, so the constraint is exercised in Part 5. What Part 4 adds is
+        the honest failure mode: `RedisConnectionFailureException` → `503
+        SEAT_HOLDS_UNAVAILABLE` rather than a 500, with the seat map degrading to
+        sold-vs-available straight from MySQL
+- [x] **Tests: 100 passing** (64 from Parts 1–3 + 36 new). `HoldKeyTest` (unit),
+      `SeatMapIntegrationTest`, `SeatHoldIntegrationTest`, `SeatHoldConcurrencyIntegrationTest`,
+      `SeatHoldExpiryIntegrationTest`
+- [x] **Verified:** `./mvnw clean test` → `Tests run: 100, Failures: 0, Errors: 0`. Covers 24
+      threads released through a `CyclicBarrier` onto one seat with exactly one winner and 23
+      `SEAT_HELD` rejections, Redis agreeing with the winner and a single broadcast going out;
+      every racer taking a different seat succeeding; a hold expiring on a 1s TTL, broadcasting
+      `AVAILABLE` and freeing the seat for the next user; an expiry after a sale broadcasting
+      `SOLD` instead; a sold seat refusing a hold; releasing someone else's hold; the seat map
+      grouped into rows with `heldByYou` visible only to its owner; and holds staying scoped to
+      their own showing.
+
+### Part 4 deviations / notes
+
+- **A hold is a Redis key, never a `bookings` row.** `BookingStatus.HELD` stays unused, exactly
+  as its javadoc from Part 1 says: an expiring hold should cost no database write.
+- **`SeatService` is deliberately not `@Transactional`.** Every read is a single query returning
+  DTOs or an eagerly-fetched entity, so there is nothing to lazy-load and nothing to roll back —
+  and a transaction would pin a database connection for the length of a Redis round trip on the
+  two hottest endpoints in the app.
+- **Broadcasts are a hint, not a source of truth.** Keyspace notifications are plain pub/sub with
+  no delivery guarantee, and Redis fires them when it actually reaps the key rather than exactly
+  at the TTL. `GET /seat-map` therefore recomputes from Redis + MySQL on every read and never
+  from accumulated events, so a client that missed a frame is made whole by a refresh.
+- **Seat ids are global, not per-showing**, so every hold proves the seat is really in the
+  showing's auditorium (`SeatRepository.findInVenue`, which returns the row in the same query and
+  so names the seat in the error message).
+- `setAllowedOriginPatterns("*")` on the SockJS endpoint is a **dev-server allowance**. In
+  production the SPA is same-origin behind Nginx (TECH.md §4); it gets narrowed with the rest of
+  CORS in Part 6.
+- **Test harness:** `AbstractIntegrationTest` now starts a Redis container too — the expiry
+  listener opens its subscription during context startup, so every context needs one. It runs
+  with `--notify-keyspace-events Ex` to match docker-compose; without that flag Redis honours the
+  TTL but publishes nothing, and the expiry tests would hang waiting on a frame that never comes.
+- **Broadcasts are asserted by subscribing a handler to `brokerChannel`**
+  (`support/SeatBroadcasts`) rather than by mocking the publisher. It exercises the real
+  destination and the real JSON converter, and needs no `@MockitoSpyBean`, so the context is not
+  dirtied and the suite keeps sharing one. The channel delivers on its own executor, so tests
+  await frames instead of draining immediately.
+- `SeatHoldExpiryIntegrationTest` overrides `app.seat-hold.ttl-seconds=1` and therefore gets its
+  own application context; the MySQL and Redis containers are still shared.
+- **Not built, deliberately:** no cap on how many seats one user may hold at once. It belongs
+  with the checkout rules in Part 5 — added to the open items below.
 
 ## Part 5 — Booking / checkout + admin reporting
 
 - [ ] `POST /api/bookings` — validate the hold still belongs to the caller, write `sold` rows in
       one transaction, delete the Redis keys, broadcast `sold`
+      - `SeatHoldStore.holderOf` / `forceRelease` are already there for exactly this
+- [ ] Cap how many seats one user may hold at once (Part 4 left this open on purpose)
 - [ ] `GET /api/bookings/me` (upcoming/past split), `GET /api/bookings/{ref}`
 - [ ] Admin: `GET /api/admin/bookings` with `BookingSpecifications` (date range, venue, status)
 - [ ] Analytics projections: `BookingsPerShowingView`, revenue-by-date (TECH.md §3a tier 4)
 - [ ] Tests: double-confirm is rejected, expired hold is rejected, totals are correct
 
-## Part 6 — Frontend scaffold + handoff cleanup
+## Part 6 — Frontend scaffold + handoff cleanup ✅ DONE
 
-- [ ] `/frontend` Vite + React 18 + TS + Tailwind (`darkMode: 'class'`), router, entry files
-      (the handoff bundle is loose source — it has no `package.json`, `index.html`, or `main.tsx`)
-- [ ] Port `design_handoff_movie_booking/src` in and **fix the known defects**:
-      - `CheckoutPage.tsx:23` and `ConfirmationPage.tsx:24` — duplicate `style` attribute on one
-        element; React keeps only the last, so the poster gradient never renders
-      - invalid Tailwind classes throughout: `h-7.5`, `w-4.5`, `w-13`, `h-21`, `h-19`, `w-14.5`,
-        `mb-4.5`, `pt-4.5` — none exist in the default v3 scale and silently do nothing
-      - `ShowingsPage` — `dateFilter` state and the venue `<select>` are wired to nothing; the
-        movie list ignores both
-      - `SeatSelectionPage` — available-seat colour contradicts the README (`bg-zinc-200` /
-        `dark:bg-zinc-100` vs "white/zinc-100 with border")
-      - `NavBar` exposes every route as a flat tab, including `/checkout` and `/confirmation`
-        with no state behind them — becomes real navigation plus a guarded flow
-- [ ] Extend the tailwind theme with the actual tokens instead of raw palette names
-- [ ] **Verify:** `npm run build` clean, `npm run dev` renders all six screens on mock data
+Taken before Part 5 at the user's request. Nothing here touches the API, so the reorder cost
+nothing: Part 7 is the first part that needs Part 5's endpoints.
+
+The handoff bundle already sat at `/frontend` (not `design_handoff_movie_booking/` as this plan
+originally said) — `README.md`, `tailwind.config.ts` and `src/`, with no way to run any of it.
+
+- [x] `/frontend` Vite 5 + React 18 + TS + Tailwind 3 (`darkMode: 'class'`), router, entry files
+      - added `package.json`, `index.html`, `vite.config.ts`, `tsconfig.json`,
+        `postcss.config.js`, `src/main.tsx`, `src/index.css`, `src/vite-env.d.ts`,
+        `public/favicon.svg`
+      - **one tsconfig, not the template's src/node split.** The split exists so the Vite config
+        can compile with Node types under `composite`, and `composite` forbids `noEmit` — which
+        this project needs, since Vite emits and `tsc` is only ever a checker here. `tsc -b`
+        fails outright on that combination (`TS6310`). Build script is `tsc --noEmit && vite build`
+      - dev server **proxies `/api` and `/ws`** to `localhost:8080`, mirroring the Nginx rules in
+        TECH.md §4. This closes the CORS question Part 2 deferred here: the browser only ever
+        talks to one origin, so the backend still needs no CORS config. `ws: true` on the `/ws`
+        rule, or the SockJS upgrade 404s in Part 8
+      - `index.html` applies the stored theme **before first paint**; React mounts after the
+        browser has painted, so without it every load flashed white for dark-mode users
+- [x] Ported the handoff in and **fixed every known defect**:
+      - `CheckoutPage` / `ConfirmationPage` duplicate `style` — JSX keeps only the last
+        attribute, so the poster gradient lost to an inline width/height and both posters
+        rendered blank. Sizes are classes now and the inline overrides are gone
+      - the eight dead Tailwind classes are **real values in `theme.spacing`** (`4.5`, `7.5`,
+        `13`, `14.5`, `19`, `21`) rather than being rewritten. The handoff author was writing the
+        sizes they wanted; making them exist fixes the classes and the duplicate `style` in one
+        move. Verified in the built CSS: `.h-7\.5{height:1.875rem}`, `.w-13{width:3.25rem}`, …
+      - `ShowingsPage` — both filters work, the venue list is **derived from the showtimes**
+        rather than a second hardcoded list, and a date with no showings gets an empty state
+      - `SeatSelectionPage` — available is `bg-seat-available` + a border, per the README. The
+        bundle's `bg-zinc-200 dark:bg-zinc-100` with no border was the same grey as the disabled
+        button, so free seats read as unavailable
+      - `NavBar` is destinations only (Showings, My Bookings, Log In). `/seats`, `/checkout` and
+        `/confirmation` are flow steps behind `RequireBookingState`, so Checkout can no longer be
+        opened cold and asked to confirm a purchase of nothing. `/` lands on Showings, not Login —
+        the catalogue is public (Part 3)
+- [x] Tailwind theme extended with **semantic tokens instead of raw palette names**
+      - `page`, `surface`, `raised`, `sunken`, `elevated`, `line`, `line-strong`, `ink`, `muted`,
+        `disabled`, `accent`, `accent-ink`, `accent-text`, `ok`, `ok-ink`, `seat-*`
+      - backed by CSS variables in `index.css` as `R G B` channel triplets composed through
+        `rgb(var(--token) / <alpha-value>)`, so opacity modifiers like `border-accent/70` survive
+      - `dark:` is now **gone from the markup entirely** — the only occurrence left in `src/` is
+        inside a comment quoting the old seat colours
+- [x] **Verified:** `npm run build` clean (`tsc --noEmit` + Vite, 45 modules, 14.8 kB CSS /
+      184.7 kB JS), and the app driven end to end in a real browser (headless Edge via
+      playwright-core) with **zero console errors**:
+      - `/` → `/showings`; date and venue filters narrow the list correctly (Today = 4 movies,
+        Tomorrow = 5, Tomorrow + Riverside IMAX = 2, Thu + Riverside = empty state)
+      - cold jumps to `/checkout`, `/confirmation` and `/seats` all bounce to `/showings`
+      - showtime → seat map → pick A1 + B1 → "2 seats selected · $28" → checkout total $28
+      - the checkout poster is 64×84 **with** its gradient — the defect that used to blank it
+      - Confirm Purchase → confirmation with a generated ref → the booking appears at the top of
+        My Bookings → Upcoming
+      - light theme: `<html>` loses `dark`, and the seat map reads
+        available `rgb(255,255,255)` + 1px border, reserved `rgb(239,68,68)`,
+        selected `rgb(16,185,129)`
+
+### Part 6 deviations / notes
+
+- **`SEAT_PRICE = 14` and `mockData.ts` are still in place.** Part 6's brief is "renders on mock
+  data"; deleting the mock source is Part 7's job, and `posterGradient` stays permanently.
+- `VENUES` is derived from `MOVIES` rather than listed separately, so the filter cannot drift
+  from the data it filters.
+- **The model mismatch is untouched.** The handoff still speaks in display strings (`'Today'`,
+  `'7:00 PM'`) where the API returns a `showingId` and an ISO `startTime`; reconciling that is
+  explicitly Part 7's item.
+- **No ESLint.** Part 10's `frontend-ci.yml` wants a lint step; `npm run build` type-checks via
+  `tsc --noEmit` in the meantime. Added to Part 10 below.
+- `public/favicon.svg` was added because the browser's `/favicon.ico` request was the only thing
+  producing console noise.
+- The browser verification used `playwright-core` installed **outside the repo** (scratchpad),
+  driving the already-installed Edge. Nothing was added to `package.json` for it and no browser
+  binary was downloaded.
 
 ## Part 7 — Wire frontend to the real API
 
@@ -271,14 +417,17 @@ The feature TECH.md §5 says to treat as most important. Gets its own part and i
 
 ## Part 8 — Live seat selection (frontend concurrency)
 
-- [ ] SockJS + STOMP client hook subscribing to `/topic/showings/{id}`
+- [ ] SockJS + STOMP client hook subscribing to `/topic/showings/{id}` — endpoint is `/ws`, the
+      frame is `{ showingId, seatId, status }`, and the countdown is driven by
+      `holdTtlSeconds` / `expiresAt` off the Part 4 responses rather than a hardcoded 300
 - [ ] Seat map reflects other users' holds live; own selection stays optimistic
 - [ ] Hold countdown timer with expiry warning, auto-release on unmount/navigate-away
 - [ ] Rejected-hold path: seat taken mid-click → revert + inline message
 
 ## Part 9 — Admin frontend
 
-Designed fresh against the handoff's tokens (teal accent, zinc surfaces, light/dark).
+Designed fresh against the Part 6 tokens (`surface`, `line`, `accent`, `muted`, …) rather than
+raw palette names, so the admin chrome inherits light/dark for free.
 
 - [ ] Admin shell + nav, separate from the customer chrome
 - [ ] Venues list/editor + visual seat-layout builder (rows, seats-per-row, aisle gaps)
@@ -292,6 +441,8 @@ Designed fresh against the handoff's tokens (teal accent, zinc surfaces, light/d
 - [ ] Backend `Dockerfile` (multi-stage), frontend `Dockerfile` (build → Nginx)
 - [ ] `nginx.conf`: SPA fallback to `index.html`, `/api/*` reverse proxy (TECH.md §4)
 - [ ] `docker-compose.yml` (dev) and `docker-compose.prod.yml` — frontend, backend, mysql, redis
+- [ ] ESLint for `/frontend` + an `npm run lint` script (Part 6 shipped without it; the build's
+      `tsc --noEmit` is the only static check today)
 - [ ] `.github/workflows/backend-ci.yml` + `frontend-ci.yml`
 - [ ] `README.md`: run instructions, seeded credentials, architecture notes
 
