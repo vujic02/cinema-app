@@ -34,8 +34,13 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
   const [confirmation, setConfirmation] = useState<ConfirmationData | null>(null);
 
-  // TODO: subscribe to STOMP/SockJS topic here (e.g. /topic/seats/{showtimeId}) and merge
-  // remote reservations into a shared seatStatus map so other customers' picks show live.
+  // TODO (Part 8): subscribe to STOMP/SockJS at /ws, topic /topic/showings/{showingId}, and
+  // merge the { showingId, seatId, status } frames into a shared seatStatus map so other
+  // customers' holds show live. `selectedSeats` stays the optimistic local view on top of it.
+  //
+  // TODO (Part 7): toggleSeat becomes POST/DELETE /api/showings/{id}/seats/{seatId}/hold —
+  // selecting a seat is a server-side hold with a TTL, not just local state, and a 409
+  // SEAT_HELD has to revert the selection.
 
   function selectShowtime(movie: Movie, showtime: Showtime) {
     setSelectedMovie(movie);

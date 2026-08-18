@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#09090b"/>
+  <!-- A ticket stub: the notches are what read as a ticket at 16px. -->
+  <path d="M7 11h18v3a2 2 0 0 0 0 4v3H7v-3a2 2 0 0 0 0-4z" fill="#14b8a6"/>
+  <circle cx="16" cy="16" r="1.6" fill="#09090b"/>
+</svg>

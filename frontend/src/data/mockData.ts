@@ -1,5 +1,7 @@
 import { Movie, VenueLayout, Booking } from '../types';
 
+// Flat price for the mock data only. The backend is authoritative — `showings.price` per
+// TECH.md §6 — and this constant goes away when Part 7 swaps mockData for the real API.
 export const SEAT_PRICE = 14;
 
 // TODO: replace with useQuery(['movies'], fetchMovies) once wired to the API
@@ -16,6 +18,15 @@ export const MOVIES: Movie[] = [
     showtimes: [{ venue: 'Downtown 8', date: 'Tomorrow', time: '6:00 PM' }, { venue: 'Riverside IMAX', date: 'Tomorrow', time: '8:45 PM' }] }
 ];
 
+/**
+ * Derived from the showtimes rather than typed out again, so the venue filter cannot drift from
+ * the data it filters. The handoff hardcoded three venues as <option> elements beside a
+ * <select> that was wired to nothing at all.
+ */
+export const VENUES: string[] = [
+  ...new Set(MOVIES.flatMap(movie => movie.showtimes.map(showtime => showtime.venue)))
+].sort();
+
 // Configurable per-venue seat map — swap for the layout the Venues admin screen configures.
 export const VENUE_LAYOUT: VenueLayout = {
   rows: ['A', 'B', 'C', 'D', 'E', 'F'],
@@ -31,6 +42,10 @@ export const INITIAL_BOOKINGS: Booking[] = [
   { id: 'b3', status: 'past', movieTitle: 'Paper Tigers', hue: 140, venue: 'Uptown Cineplex', date: 'Jul 2', time: '5:15 PM', seats: ['A6', 'A7', 'A8'], total: 42, ref: 'LUM-11029' }
 ];
 
+/**
+ * Stays after Part 7 deletes the rest of this file: poster art is a gradient placeholder keyed
+ * off `movies.poster_hue`, which the backend serves and the UI renders.
+ */
 export function posterGradient(hue: number) {
   return { backgroundImage: `linear-gradient(160deg, hsl(${hue} 45% 32%) 0%, hsl(${hue} 40% 18%) 100%)` };
 }
