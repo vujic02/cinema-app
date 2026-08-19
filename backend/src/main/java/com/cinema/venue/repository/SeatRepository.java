@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,4 +38,16 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             where s.id = :seatId and r.venue.id = :venueId
             """)
     Optional<Seat> findInVenue(@Param("seatId") Long seatId, @Param("venueId") Long venueId);
+
+    /**
+     * The same membership check for a whole checkout basket. Returns only the seats that really
+     * are in the venue, so the caller compares sizes to find the ones that are not — one query
+     * for the basket rather than one per seat.
+     */
+    @Query("""
+            select s from Seat s
+              join fetch s.row r
+            where s.id in :seatIds and r.venue.id = :venueId
+            """)
+    List<Seat> findAllInVenue(@Param("seatIds") Collection<Long> seatIds, @Param("venueId") Long venueId);
 }

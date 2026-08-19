@@ -78,6 +78,9 @@ app:
   seat-hold:
     # TECH.md §5: holds live in Redis with a TTL and auto-expire back to available.
     ttl-seconds: 300
+    # Per user, per showing. Without a cap one caller can hold a whole auditorium for the full
+    # TTL and lock everyone else out; 10 is comfortably above a real group booking.
+    max-seats-per-user: 10
   jwt:
     issuer: lumen-cinema
     access-token-ttl-minutes: 15
