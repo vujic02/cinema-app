@@ -49,6 +49,9 @@ public interface ShowingRepository extends JpaRepository<Showing, Long>, JpaSpec
     /** Blocks deleting a venue that still has showings scheduled in it. */
     boolean existsByVenueId(Long venueId);
 
+    /** Dashboard counter: how much is still to come (Part 5 analytics). */
+    long countByStartTimeAfter(Instant cutoff);
+
     /** Blocks deleting a movie that is still scheduled somewhere. */
     boolean existsByMovieId(Long movieId);
 

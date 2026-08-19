@@ -317,16 +317,84 @@ and bookings without belonging to any of them, and Part 5's checkout consumes it
 - **Not built, deliberately:** no cap on how many seats one user may hold at once. It belongs
   with the checkout rules in Part 5 — added to the open items below.
 
-## Part 5 — Booking / checkout + admin reporting
+## Part 5 — Booking / checkout + admin reporting ✅ DONE
 
-- [ ] `POST /api/bookings` — validate the hold still belongs to the caller, write `sold` rows in
+- [x] `POST /api/bookings` — validate the hold still belongs to the caller, write `sold` rows in
       one transaction, delete the Redis keys, broadcast `sold`
-      - `SeatHoldStore.holderOf` / `forceRelease` are already there for exactly this
-- [ ] Cap how many seats one user may hold at once (Part 4 left this open on purpose)
-- [ ] `GET /api/bookings/me` (upcoming/past split), `GET /api/bookings/{ref}`
-- [ ] Admin: `GET /api/admin/bookings` with `BookingSpecifications` (date range, venue, status)
-- [ ] Analytics projections: `BookingsPerShowingView`, revenue-by-date (TECH.md §3a tier 4)
-- [ ] Tests: double-confirm is rejected, expired hold is rejected, totals are correct
+      - `booking/service/BookingService.confirm` — the basket is **all-or-nothing**: one lapsed
+        hold rejects the whole purchase and writes nothing
+      - **the Redis delete and the broadcast happen after the transaction commits**
+        (`TransactionSynchronization.afterCommit`), not inside it. Announcing a sale that a
+        rollback then undid would leave every open seat map showing seats as permanently sold
+        that nobody owns — and only a page refresh, not another broadcast, would clear it
+      - `forceRelease` rather than the compare-and-delete used elsewhere: the hold has just been
+        proven to belong to this buyer, and the sale supersedes it either way. `DEL` fires no
+        expiry event, so the only frame the room sees for those seats is the `SOLD` one
+      - failure codes are distinct because the UI reacts differently to each: `HOLD_EXPIRED`
+        (send them back to the seat map), `SEAT_HELD` (someone else took it), `SEAT_SOLD`
+        (double-confirm), `SEAT_NOT_IN_SHOWING`, `SHOWING_STARTED`
+      - `bookings.saveAll` flushes the basket in one go, so `uq_bookings_showing_seat` is the
+        backstop if Redis was down and two checkouts slipped past the hold check
+      - price is snapshotted per row from `showings.price`; the client never sends a total
+- [x] Cap how many seats one user may hold at once — `app.seat-hold.max-seats-per-user: 10`
+      - counted **per showing**, from Redis rather than a counter of our own, so a lapsed hold
+        stops counting the moment it expires
+      - re-holding a seat you already hold is exempt, or it would break Part 4's idempotent
+        re-click
+- [x] `GET /api/bookings/me` (upcoming/past split), `GET /api/bookings/{ref}`
+      - the split is computed server-side off `showings.start_time`, so both tabs agree with the
+        server about where "now" is
+      - **a reference belonging to someone else answers 404, not 403.** A 403 confirms the
+        reference exists, which turns the endpoint into an oracle for guessing booking codes
+      - rows are folded back into one purchase per reference; seats are sorted by label so a
+        ticket reads A1, A2, A3 regardless of click order
+- [x] Admin: `GET /api/admin/bookings` with `BookingSpecifications` (date range, venue, movie,
+      status)
+      - dates filter on the **showing's** start time, not the purchase time — an admin asking for
+        a weekend means the screenings. The purchase timeline is what revenue-by-date is for
+      - the specs `join("showing")` once and reuse it; a path expression through a to-one
+        association emits a fresh join per use, so filtering on two showing fields would produce
+        two
+      - admin rows carry a `customer` block that the customer's own view does not
+- [x] Analytics projections: `BookingsPerShowingView`, `RevenueByDateView` (TECH.md §3a tier 4)
+      - `GET /api/admin/analytics` — four counters, top showings by revenue, revenue by date
+      - purchases are counted as `count(distinct bookingReference)`; tickets as rows. Three seats
+        on one reference is one sale and three tickets
+      - revenue-by-date is keyed on **purchase** day via `cast(b.createdAt as Date)`, which is how
+        JPQL truncates a timestamp and is what lets the projection expose a `LocalDate`
+- [x] **Tests: 129 passing** (100 from Parts 1–4 + 29 new). `CheckoutIntegrationTest`,
+      `BookingHistoryIntegrationTest`, `AdminBookingIntegrationTest`,
+      `SeatHoldLimitIntegrationTest`
+- [x] **Verified:** `./mvnw clean test` → `Tests run: 129, Failures: 0, Errors: 0`. Covers
+      double-confirm rejected with exactly one row surviving, an expired hold rejected, a
+      partial basket writing nothing while leaving the good hold intact, buying a seat someone
+      else holds, a duplicated seat collapsing to one ticket, the `SOLD` broadcast and hold
+      cleanup, the 404-not-403 rule for a stranger's reference, upcoming/past moving when the
+      showing is backdated, all four admin filters, analytics totals and both series, and the
+      hold cap per user and per showing.
+
+### Part 5 deviations / notes
+
+- **Booking references are `LUM-` + 6 characters from a 30-symbol alphabet**, not the handoff's
+  `LUM-77291`. Uniqueness cannot be a database constraint here — the reference is deliberately
+  shared by every row of one purchase — so it is established by generating from a ~729 million
+  space and checking `existsByBookingReference`, with bounded retries. Five digits (90k) would
+  collide at a few hundred bookings. I, L, O, U, 0 and 1 are excluded: the code gets read aloud
+  at a counter.
+- **`BookingStatus.HELD` is still never written.** Holds live in Redis (Part 4), so the status
+  filter on the admin screen returns nothing for `HELD` by design — asserted in a test so the
+  behaviour is deliberate rather than an accident waiting to be "fixed".
+- Admin bookings return a plain `List`, matching the Part 3 precedent. Pagination is Part 9's,
+  when the table exists and its shape is known — and it needs care, because paginating rows would
+  split a purchase across pages.
+- **Analytics counters are platform-wide and unfiltered by date**; only the two series honour
+  `since`. The dashboard's headline numbers are "all time", which is what the counters mean.
+- `confirm` collapses a duplicated seat id rather than rejecting the basket, so a double-submit
+  buys one ticket instead of erroring.
+- **Payment stays simulated** per TECH.md §Payments — confirming is the whole transaction.
+- Test-rig change: `AbstractSeatIntegrationTest` is now public with a `holdStore` handle and
+  `hold` / `checkoutBody` helpers, so the booking tests in another package can build on the same
+  auditorium fixture instead of duplicating it.
 
 ## Part 6 — Frontend scaffold + handoff cleanup ✅ DONE
 
@@ -454,8 +522,9 @@ raw palette names, so the admin chrome inherits light/dark for free.
   `SEAT_PRICE = 14`. Backend is authoritative; the flat constant goes away in Part 7.
 - TECH.md §6 has no `seat_type` pricing multiplier even though `seats.seat_type` exists —
   treated as a display-only label for v1.
-- Booking reference (`LUM-77291`) is client-generated in the handoff. Moves server-side in
-  Part 5 so it can be unique and looked up.
+- ~~Booking reference is client-generated in the handoff~~ — server-side as of Part 5,
+  `LUM-` + 6 chars from an unambiguous 30-symbol alphabet. The frontend mock still mints its
+  own; that goes away in Part 7.
 - Showing day boundaries are UTC (Part 3). Correct while the whole stack runs UTC, but a real
   chain needs the *venue's* local day — otherwise a 00:30 screening lands on the previous day's
   listing. Would mean a timezone column on `venues`.

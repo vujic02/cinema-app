@@ -4,6 +4,7 @@ import com.cinema.auth.repository.UserRepository;
 import com.cinema.booking.domain.Booking;
 import com.cinema.booking.domain.BookingStatus;
 import com.cinema.booking.repository.BookingRepository;
+import com.cinema.seat.service.SeatHoldStore;
 import com.cinema.showing.repository.ShowingRepository;
 import com.cinema.support.AbstractIntegrationTest;
 import com.cinema.venue.repository.SeatRepository;
@@ -19,6 +20,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -29,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * seat statuses can be asserted exactly without the seed data — or another test class sharing
  * the container — moving the numbers.
  */
-abstract class AbstractSeatIntegrationTest extends AbstractIntegrationTest {
+public abstract class AbstractSeatIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     protected BookingRepository bookings;
@@ -46,6 +49,10 @@ abstract class AbstractSeatIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     protected TransactionTemplate transactions;
 
+    /** Lets a test inspect or tear down a hold without going through the API. */
+    @Autowired
+    protected SeatHoldStore holdStore;
+
     /** What {@code SimpMessagingTemplate} publishes on; {@link com.cinema.support.SeatBroadcasts} listens here. */
     @Autowired
     @Qualifier("brokerChannel")
@@ -56,13 +63,13 @@ abstract class AbstractSeatIntegrationTest extends AbstractIntegrationTest {
      *
      * @param seatIds every seat id in draw order, so a test can say "the third seat"
      */
-    protected record Auditorium(long venueId, long showingId, List<Long> seatIds, List<String> labels) {
+    public record Auditorium(long venueId, long showingId, List<Long> seatIds, List<String> labels) {
 
-        long seat(int index) {
+        public long seat(int index) {
             return seatIds.get(index);
         }
 
-        String label(int index) {
+        public String label(int index) {
             return labels.get(index);
         }
     }
@@ -164,5 +171,21 @@ abstract class AbstractSeatIntegrationTest extends AbstractIntegrationTest {
 
     protected String holdUrl(long showingId, long seatId) {
         return "/api/showings/" + showingId + "/seats/" + seatId + "/hold";
+    }
+
+    /** Places real holds through the API, which is what a checkout has to be sitting on. */
+    protected void hold(Auditorium hall, String bearer, int... seatIndexes) throws Exception {
+        for (int index : seatIndexes) {
+            mockMvc.perform(post(holdUrl(hall.showingId(), hall.seat(index)))
+                            .header("Authorization", bearer))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    protected String checkoutBody(long showingId, long... seatIds) {
+        String ids = LongStream.of(seatIds).mapToObj(String::valueOf).collect(Collectors.joining(","));
+        return """
+                {"showingId":%d,"seatIds":[%s]}
+                """.formatted(showingId, ids);
     }
 }

@@ -112,6 +112,8 @@ public class SeatService {
             throw new ConflictException("SEAT_SOLD", "Seat " + seat.label() + " has already been sold");
         }
 
+        rejectIfAtHoldLimit(showingId, seatId, userId);
+
         HoldKey key = new HoldKey(showingId, seatId);
         HoldResult result = holds.acquire(key, userId, appProperties.seatHold().ttl());
 
@@ -145,6 +147,30 @@ public class SeatService {
             case NOT_YOURS -> throw new ConflictException("HOLD_NOT_YOURS",
                     "That seat is held by someone else, so it is not yours to release");
             case NOT_HELD -> { /* Already free. Nothing changed, so nothing to broadcast. */ }
+        }
+    }
+
+    /**
+     * Caps how much of one showing a single user can sit on at once. Without it, a caller can
+     * hold every seat in the auditorium for the full TTL — no race needed, just a loop — and
+     * keep re-holding as each one lapses.
+     *
+     * <p>Counted from Redis rather than from a counter of our own, so an expired hold stops
+     * counting the moment it lapses. Re-holding a seat already held by this user is exempt: it
+     * adds nothing to the total, and rejecting it would break the idempotent re-click.
+     */
+    private void rejectIfAtHoldLimit(Long showingId, Long seatId, Long userId) {
+        int limit = appProperties.seatHold().maxSeatsPerUser();
+
+        long mine = holds.holdsForShowing(showingId).entrySet().stream()
+                .filter(entry -> entry.getValue().equals(userId))
+                .filter(entry -> !entry.getKey().equals(seatId))
+                .count();
+
+        if (mine >= limit) {
+            throw new ConflictException("HOLD_LIMIT_REACHED",
+                    "You can hold at most " + limit + " seats for one showing. "
+                            + "Release one before choosing another.");
         }
     }
 
