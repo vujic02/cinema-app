@@ -13,6 +13,11 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    // Matches `test.globals: true` in vite.config.ts, so `describe`/`it`/`expect` type-check
+    // without an import in every spec. This list only governs which @types packages are pulled
+    // in globally — @types/react and friends still resolve through their own imports.
+    "types": ["vitest/globals"],
+
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
