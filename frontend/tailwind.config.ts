@@ -47,9 +47,15 @@ export default {
         /** Success: the confirmation tick, the "upcoming" badge, a selected seat. */
         ok: token('ok'),
         'ok-ink': token('ok-ink'),
+        /** Error text, and the tinted panel it sits in. */
+        danger: token('danger'),
+        'danger-surface': token('danger-surface'),
         seat: {
           available: token('seat-available'),
+          /** Sold — a booking row exists in MySQL. */
           reserved: token('seat-reserved'),
+          /** Somebody else's live Redis hold, which may still expire. */
+          held: token('seat-held'),
           selected: token('seat-selected'),
           /** Seat numbers stay dark in both themes: the seat itself is always light. */
           ink: token('seat-ink')

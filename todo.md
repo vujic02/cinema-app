@@ -473,15 +473,154 @@ originally said) — `README.md`, `tailwind.config.ts` and `src/`, with no way t
   driving the already-installed Edge. Nothing was added to `package.json` for it and no browser
   binary was downloaded.
 
-## Part 7 — Wire frontend to the real API
+## Part 7 — Wire frontend to the real API ✅ DONE
 
-- [ ] Axios/fetch client with the JWT interceptor + silent refresh on 401
-- [ ] `AuthContext` (real login/register/logout), route guards, admin-only routes
-- [ ] TanStack Query for movies, showings, seat map, bookings — replacing every `// TODO:
-      replace with useQuery(...)` marker in the handoff
-- [ ] Delete `mockData.ts` as a data source; keep `posterGradient` as a UI helper
-- [ ] Reconcile the model mismatch: the handoff uses display strings (`'Today'`, `'7:00 PM'`)
-      where the API returns a `showingId` + ISO `start_time`
+Every screen reads the server now. `mockData.ts` is gone.
+
+- [x] **Axios client with the JWT interceptor + silent refresh on 401** — `api/client.ts`,
+      `api/tokens.ts`
+      - `baseURL: '/api'` and deliberately no `VITE_API_URL` escape hatch: the dev proxy and
+        Nginx both put the API on the page's own origin (TECH.md §4), so introducing a base URL
+        would mean introducing CORS
+      - **single-flight refresh.** `/auth/refresh` *rotates* — it revokes the token it was
+        handed — so two parallel 401s each refreshing would leave the second presenting a token
+        the server had already killed. Every caller awaits one shared promise instead
+      - the refresh itself goes through bare `axios`, not the instance, or a failing refresh
+        would recurse into refreshing itself
+      - `_retried` marks a replayed request, so a persistent 401 gives up instead of looping
+      - fires on 401 only. The backend's 401-vs-403 split (`RestAuthErrorHandler`) is what makes
+        that safe: a customer hitting an admin route gets a 403 and is not retried
+      - auth routes are excluded both ways — no `Authorization` header on them (a stale token
+        would 401 the very call meant to establish the session) and no refresh on their failures
+      - `errorCode()` / `errorMessage()` — screens branch on `SEAT_HELD`, `HOLD_EXPIRED`, … and
+        show the server's message, never "Request failed with status code 409"
+- [x] **`AuthContext` + route guards** — real login/register/logout, `RequireAuth` with an
+      optional `role` for Part 9's admin section
+      - a stored token is verified against `/auth/me` on load rather than trusted; a lapsed
+        access token recovers through the same silent refresh instead of ending the session
+      - `isLoading` is what keeps a page refresh from signing you out: the user is briefly null
+        while `/auth/me` is in flight, and the guard must not redirect during that window
+      - sign-in and sign-out call `queryClient.clear()` — `heldByYou` and `/bookings/me` mean
+        something different once the caller changes
+      - a rejected refresh token dispatches a window event the provider listens for; the axios
+        interceptor is module scope and cannot call `setState`
+      - tokens in `localStorage`, every access wrapped in try/catch (Safari private mode throws
+        on both read and write, and a storage failure must not take the page down)
+- [x] **TanStack Query everywhere** — `api/hooks.ts`. Every `// TODO: replace with useQuery(...)`
+      marker is gone
+      - reads: `useMovies`, `useVenues`, `useShowings`, `useSeatMap`, `useMyBookings`
+      - writes: `useHoldSeat`, `useReleaseSeat`, `useConfirmBooking`
+      - hold/release patch the cached seat map in place instead of refetching it — the map is
+        the biggest payload in the flow and the server has already confirmed the change.
+        `availableCount` is recounted rather than nudged by ±1, so it cannot drift out of step
+        with the grid it counts
+      - `retry` is off for 4xx: a 409 is an answer, not a hiccup, and retrying it only delays
+        the message the customer needs to read
+- [x] **`mockData.ts` deleted.** `posterGradient` moved to `lib/poster.ts` — it was never mock
+      data, it is how a poster is drawn from `movies.poster_hue`. `SEAT_PRICE = 14` is gone;
+      price comes off the showing. `src/types.ts` is down to `Theme`, with the API's shapes in
+      `api/types.ts` mirroring the backend records one for one
+- [x] **Model mismatch reconciled** — `lib/datetime.ts`, the one place that turns instants into
+      the handoff's display strings
+      - the day chips are **derived from the clock**. The handoff hardcoded
+        `['Today','Tomorrow','Wed','Thu','Fri']`, which was only ever right on a Monday
+      - **everything is formatted in UTC**, because the backend buckets days at UTC midnight
+        (`ShowingService.findPublic`). Rendering in the browser's zone would let the chip and
+        the time printed under it disagree about which day a 23:30 screening belongs to. The
+        venue-local fix is still on the open-items list below; `DISPLAY_ZONE` is the single line
+        it would change
+      - showings that have already started are dropped from the listing: a date filter returns
+        the whole calendar day, and both `SeatService` and `BookingService` refuse a started
+        showing with `SHOWING_STARTED`, so offering one is a button that can only fail
+
+### Built beyond the brief (small, and load-bearing)
+
+- [x] **`posterHue` added to `BookingResponse`** (the only backend change). The confirmation and
+      My Bookings screens draw a poster, and this was the one movie-carrying DTO that did not
+      serve the hue — the alternative was inventing a second, disagreeing way to colour the same
+      movie.
+- [x] **Held seats are visually distinct from sold ones.** The API has always returned `HELD` vs
+      `SOLD`; the mock had only "reserved". A held seat is somebody mid-checkout whose TTL may
+      lapse, so it is amber and worth waiting for — a second red would read as sold out. New
+      `--seat-held` token; `--danger` / `--danger-surface` added for the error panels.
+- [x] **The seat map stays public; the sign-in prompt moved to the seat click.** `GET` seat-map
+      is permitAll and holding is not, so browsing anonymously works and the prompt arrives at
+      the moment an account is actually needed. The redirect carries the location, so signing in
+      returns to the seat map with the showing intact.
+- [x] **Holds survive a reload.** A hold is a Redis key, not component state, so the seat map's
+      `heldByYou` flags are adopted into the booking context once per showing. Without it a
+      reload mid-selection showed selected seats the checkout guard could not see.
+
+### Tests
+
+- [x] **Frontend: 34 passing** (7 from Part 6 + 27 new). `npm test`
+      - `api/client.test.ts` (14) — the interceptor, stubbed at the adapter seam so the real
+        interceptors, the real single-flight promise and the real token store all run. Covers
+        the header rules, refresh-and-replay, **three parallel 401s spending the refresh token
+        once**, session teardown on a rejected refresh, no-loop after one replay, the 403 and
+        missing-refresh-token cases, and `errorCode`/`errorMessage` extraction
+      - `lib/datetime.test.ts` (13) — the agreement with the backend: chip values are the
+        `yyyy-MM-dd` the API buckets on, a 23:30 UTC showing stays on the day its query filed it,
+        and month/leap-day boundaries do not produce a 32nd
+      - `RequireBookingState.test.tsx` (7) — updated for the new context shape; every redirect
+        rule held
+- [x] **Backend: 129 passing**, unchanged by the `posterHue` addition.
+      `./mvnw clean test` → `Tests run: 129, Failures: 0, Errors: 0`
+
+### Verified in a real browser
+
+Headless Edge via `playwright-core` (installed outside the repo, nothing added to
+`package.json`, no browser binary downloaded), against the real stack: MySQL + Redis in Docker,
+Spring Boot on `local`, Vite dev server. **Zero application console errors throughout.**
+
+Happy path:
+
+- `/` → `/showings`; Today lists 2 movies, Tomorrow 4, Tomorrow + Uptown Cineplex 2,
+  Today + Downtown 8 1, and a day with no showings gets the empty state
+- anonymous cold jumps: `/seats` → `/showings`; `/checkout`, `/confirmation`, `/bookings` →
+  `/login` (auth is the outer guard)
+- the seat map renders anonymously; clicking a seat → `/login` → signing in returns **to the
+  seat map**, showing still selected
+- hold one seat ("1 seat selected · $18.50") → release ("Select your seats") → hold two
+  ("2 seats selected · $37.00"), priced off `showings.price` rather than a constant
+- a seat held by another customer renders "(on hold)", amber and disabled
+- reload mid-selection → both seats still selected, adopted from `heldByYou`
+- checkout `Seats A6, A7 | Price per ticket $18.50 | Total $37.00`, poster gradient intact (the
+  Part 6 duplicate-`style` defect stays fixed) → Confirm → **server-minted** `LUM-QN7D6P`
+- My Bookings: Upcoming/Past come from the server's split; each row opens its own reference
+- the bought seats come back sold; the session survives a full reload; Log Out clears both
+  tokens and returns the nav to its signed-out state
+
+Edge paths a happy-path run cannot reach:
+
+- **silent refresh** — with the access token replaced by garbage and the refresh token kept,
+  `/bookings` renders normally, `POST /api/auth/refresh` is called **exactly once** (two
+  concurrent 401s, from StrictMode's double-invoked effect — the single-flight guard doing its
+  job), the refresh token rotates, and the customer never sees a login form
+- **rejected refresh token** → both tokens cleared, redirect to `/login`
+- **lost seat race** — another customer takes the seat between render and click →
+  *"Seat B1 is being held by someone else. Pick another seat."*, the optimistic selection
+  reverts, and B1 repaints as "(on hold)" with no manual refresh
+
+### Part 7 deviations / notes
+
+- **`RequireAuth` wraps `RequireBookingState`, not the other way round.** An anonymous cold jump
+  to `/checkout` therefore lands on `/login` rather than `/showings`. Signing in returns them to
+  `/checkout`, which then bounces to `/showings` because there is still no booking state — two
+  hops, but each guard answers only the question it owns.
+- **Seat holds are not released on navigate-away.** Leaving the seat map abandons them to their
+  TTL. Eager release is explicitly Part 8's item, together with the countdown; `expiresAt` is
+  already carried on `HeldSeat` and goes unused for now.
+- **The seat map has no live updates yet** — another customer's hold appears on the next fetch
+  (mount, window focus, or a failed hold of your own), not instantly. That is Part 8's subject.
+- **Admin-only routing is wired but has nothing behind it.** `RequireAuth role="ADMIN"` is
+  written and unused until Part 9 adds the screens.
+- **The seeded showings had all expired**, exactly as the open item below predicted. Seven fresh
+  showings were created **through the Part 3 admin API** for the verification rather than
+  recreating the volume, so nothing existing was destroyed.
+- `qrcode.react` is still not installed; the confirmation QR stays a CSS placeholder.
+- Part 10's ESLint item matters more now: `api/`, `lib/` and the contexts roughly doubled the
+  source, and `tsc --noEmit` is still the only static check.
 
 ## Part 8 — Live seat selection (frontend concurrency)
 

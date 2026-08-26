@@ -1,79 +1,95 @@
-import React, { createContext, useContext, useState } from 'react';
-import { Movie, Showtime, Booking } from '../types';
-import { INITIAL_BOOKINGS, SEAT_PRICE, VENUE_LAYOUT } from '../data/mockData';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { BookingResponse, ShowingResponse } from '../api/types';
 
-interface ConfirmationData {
-  movieTitle: string;
-  hue: number;
-  venue: string;
-  date: string;
-  time: string;
-  seats: string[];
-  total: number;
-  ref: string;
+/**
+ * The state that spans the three steps of the booking flow, and nothing else.
+ *
+ * Before Part 7 this context *was* the application: it owned the seat map's reserved list, the
+ * booking history, and minted its own booking reference. All three are server state now and
+ * live in TanStack Query. What is left is genuinely client state — which showing the customer
+ * clicked, which seats they are currently holding, and the receipt to render next — none of
+ * which the server can be asked for by URL.
+ *
+ * Seats are the seats the customer *holds*. A hold is a Redis key with a TTL placed by
+ * `POST /showings/{id}/seats/{seatId}/hold`, so this list mirrors server state rather than
+ * defining it; `SeatSelectionPage` reconciles it against the seat map's `heldByYou` flags on
+ * load, which is what makes a reload mid-selection resume instead of losing the seats.
+ */
+
+export interface HeldSeat {
+  seatId: number;
+  /** "C4" — carried alongside the id so checkout can print seats without another lookup. */
+  label: string;
+  /** ISO instant the hold lapses. Part 8's countdown reads this; Part 7 only stores it. */
+  expiresAt: string | null;
 }
 
 interface BookingContextValue {
-  selectedMovie: Movie | null;
-  selectedShowtime: Showtime | null;
-  selectedSeats: string[];
-  bookings: Booking[];
-  confirmation: ConfirmationData | null;
-  selectShowtime: (movie: Movie, showtime: Showtime) => void;
-  toggleSeat: (seatId: string) => void;
-  confirmPurchase: () => void;
-  viewBooking: (booking: Booking) => void;
+  selectedShowing: ShowingResponse | null;
+  selectedSeats: HeldSeat[];
+  confirmation: BookingResponse | null;
+  selectShowing: (showing: ShowingResponse) => void;
+  addSeat: (seat: HeldSeat) => void;
+  removeSeat: (seatId: number) => void;
+  /** Replaces the working set wholesale — used to adopt the holds the server says we have. */
+  setSeats: (seats: HeldSeat[]) => void;
+  setConfirmation: (booking: BookingResponse) => void;
+  /** Drops the in-flight flow, leaving any confirmation on screen alone. */
+  clearFlow: () => void;
 }
 
 const BookingContext = createContext<BookingContextValue | undefined>(undefined);
 
 export function BookingProvider({ children }: { children: React.ReactNode }) {
-  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
-  const [selectedShowtime, setSelectedShowtime] = useState<Showtime | null>(null);
-  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
-  const [confirmation, setConfirmation] = useState<ConfirmationData | null>(null);
+  const [selectedShowing, setSelectedShowing] = useState<ShowingResponse | null>(null);
+  const [selectedSeats, setSelectedSeats] = useState<HeldSeat[]>([]);
+  const [confirmation, setConfirmationState] = useState<BookingResponse | null>(null);
 
-  // TODO (Part 8): subscribe to STOMP/SockJS at /ws, topic /topic/showings/{showingId}, and
-  // merge the { showingId, seatId, status } frames into a shared seatStatus map so other
-  // customers' holds show live. `selectedSeats` stays the optimistic local view on top of it.
-  //
-  // TODO (Part 7): toggleSeat becomes POST/DELETE /api/showings/{id}/seats/{seatId}/hold —
-  // selecting a seat is a server-side hold with a TTL, not just local state, and a 409
-  // SEAT_HELD has to revert the selection.
-
-  function selectShowtime(movie: Movie, showtime: Showtime) {
-    setSelectedMovie(movie);
-    setSelectedShowtime(showtime);
+  const selectShowing = useCallback((showing: ShowingResponse) => {
+    setSelectedShowing(showing);
+    // Holds are per showing; seats picked for a different screening mean nothing here. The
+    // abandoned ones lapse on their own TTL — Part 8 releases them eagerly on navigate-away.
     setSelectedSeats([]);
-  }
+  }, []);
 
-  function toggleSeat(seatId: string) {
-    if (VENUE_LAYOUT.reservedSeatIds.includes(seatId)) return;
-    setSelectedSeats(seats => (seats.includes(seatId) ? seats.filter(s => s !== seatId) : [...seats, seatId]));
-  }
+  const addSeat = useCallback((seat: HeldSeat) => {
+    setSelectedSeats(seats => (seats.some(s => s.seatId === seat.seatId) ? seats : [...seats, seat]));
+  }, []);
 
-  function confirmPurchase() {
-    if (!selectedMovie || !selectedShowtime) return;
-    const total = selectedSeats.length * SEAT_PRICE;
-    const ref = 'LUM-' + Math.floor(10000 + Math.random() * 89999);
-    const data: ConfirmationData = {
-      movieTitle: selectedMovie.title, hue: selectedMovie.hue, venue: selectedShowtime.venue,
-      date: selectedShowtime.date, time: selectedShowtime.time, seats: [...selectedSeats], total, ref
-    };
-    setConfirmation(data);
-    setBookings(b => [{ id: 'b' + Date.now(), status: 'upcoming', ...data }, ...b]);
-  }
+  const removeSeat = useCallback((seatId: number) => {
+    setSelectedSeats(seats => seats.filter(seat => seat.seatId !== seatId));
+  }, []);
 
-  function viewBooking(booking: Booking) {
-    setConfirmation({ ...booking });
-  }
+  const setSeats = useCallback((seats: HeldSeat[]) => setSelectedSeats(seats), []);
 
-  return (
-    <BookingContext.Provider value={{ selectedMovie, selectedShowtime, selectedSeats, bookings, confirmation, selectShowtime, toggleSeat, confirmPurchase, viewBooking }}>
-      {children}
-    </BookingContext.Provider>
+  const setConfirmation = useCallback((booking: BookingResponse) => {
+    setConfirmationState(booking);
+    // The purchase consumed the holds; leaving them selected would let the customer walk back
+    // into checkout with seats they have already bought.
+    setSelectedSeats([]);
+  }, []);
+
+  const clearFlow = useCallback(() => {
+    setSelectedShowing(null);
+    setSelectedSeats([]);
+  }, []);
+
+  const value = useMemo<BookingContextValue>(
+    () => ({
+      selectedShowing,
+      selectedSeats,
+      confirmation,
+      selectShowing,
+      addSeat,
+      removeSeat,
+      setSeats,
+      setConfirmation,
+      clearFlow
+    }),
+    [selectedShowing, selectedSeats, confirmation, selectShowing, addSeat, removeSeat, setSeats, setConfirmation, clearFlow]
   );
+
+  return <BookingContext.Provider value={value}>{children}</BookingContext.Provider>;
 }
 
 export function useBooking() {

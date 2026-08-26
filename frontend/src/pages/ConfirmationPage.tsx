@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
-import { posterGradient } from '../data/mockData';
 import { useBooking } from '../context/BookingContext';
+import { formatDayAndTime, formatMoney } from '../lib/datetime';
+import { posterGradient } from '../lib/poster';
 
 export default function ConfirmationPage() {
   const { confirmation } = useBooking();
@@ -17,15 +18,19 @@ export default function ConfirmationPage() {
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-ok">
         <div className="h-2.5 w-4.5 -translate-y-0.5 translate-x-0.5 rotate-[-45deg] border-b-4 border-l-4 border-ok-ink" />
       </div>
-      <h1 className="mb-1 text-xl font-semibold">You&apos;re all set!</h1>
-      <p className="mb-7 text-sm text-muted">Your tickets have been booked</p>
+      <h1 className="mb-1 text-xl font-semibold">
+        {confirmation.upcoming ? "You're all set!" : 'Your ticket'}
+      </h1>
+      <p className="mb-7 text-sm text-muted">
+        {confirmation.upcoming ? 'Your tickets have been booked' : 'This showing has already played'}
+      </p>
 
       <div className="rounded-2xl border border-dashed border-line-strong bg-surface p-6 text-left">
         <div className="mb-4.5 flex gap-3.5">
           {/* Same duplicate-`style` defect as CheckoutPage: the gradient lost to the inline
               size and the poster came out blank. Sized with classes now (h-19 w-14.5). */}
           <div
-            style={posterGradient(confirmation.hue)}
+            style={posterGradient(confirmation.posterHue)}
             className="flex h-19 w-14.5 flex-shrink-0 items-center justify-center rounded-lg font-mono text-[8px] text-white/50"
           >
             POSTER
@@ -33,10 +38,13 @@ export default function ConfirmationPage() {
           <div>
             <h3 className="text-lg font-semibold">{confirmation.movieTitle}</h3>
             <p className="mt-1 text-sm text-muted">
-              {confirmation.venue} · {confirmation.date}, {confirmation.time}
+              {confirmation.venueName} · {formatDayAndTime(confirmation.startTime)}
             </p>
             <p className="text-sm text-muted">
-              Seats {confirmation.seats.join(', ')} · ${confirmation.total}
+              {/* Seats come back sorted by label, so a three-seat ticket reads A4, A5, A6
+                  regardless of the order they were clicked. */}
+              Seats {confirmation.seats.map(seat => seat.label).join(', ')} ·{' '}
+              {formatMoney(confirmation.total)}
             </p>
           </div>
         </div>
@@ -47,7 +55,9 @@ export default function ConfirmationPage() {
           </div>
           <div>
             <p className="text-[11px] tracking-wide text-muted">BOOKING REF</p>
-            <p className="mt-0.5 font-mono text-base font-bold">{confirmation.ref}</p>
+            {/* Server-minted (`LUM-` + 6 unambiguous characters). The handoff generated its own
+                client-side, which meant two customers could print the same ticket. */}
+            <p className="mt-0.5 font-mono text-base font-bold">{confirmation.reference}</p>
           </div>
         </div>
       </div>

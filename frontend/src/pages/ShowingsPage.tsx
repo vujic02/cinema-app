@@ -1,40 +1,58 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MOVIES, VENUES, posterGradient } from '../data/mockData';
+import { useShowings, useVenues } from '../api/hooks';
+import { ShowingResponse } from '../api/types';
+import { ErrorNotice, Loading } from '../components/QueryState';
 import { useBooking } from '../context/BookingContext';
-import { Showtime, Movie } from '../types';
+import { dayChips, formatDuration, formatTime } from '../lib/datetime';
+import { posterGradient } from '../lib/poster';
 
-const DATES = ['Today', 'Tomorrow', 'Wed', 'Thu', 'Fri'];
 const ALL_VENUES = 'All venues';
 
 export default function ShowingsPage() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
-  const [dateFilter, setDateFilter] = useState('Today');
-  const [venueFilter, setVenueFilter] = useState(ALL_VENUES);
-  const { selectShowtime } = useBooking();
+  // The chips are derived once per mount rather than per render, so the "Today" chip cannot
+  // change identity underneath a selection while the page is open.
+  const days = useMemo(() => dayChips(), []);
+  const [date, setDate] = useState(days[0].value);
+  const [venueId, setVenueId] = useState<number | null>(null);
+  const { selectShowing } = useBooking();
   const navigate = useNavigate();
 
-  /**
-   * Both filters now actually filter. In the handoff `dateFilter` was set by the chips and read
-   * by nothing, and the venue `<select>` had no `value` or `onChange` at all — the movie list
-   * rendered every showtime regardless of either.
-   *
-   * A movie drops out entirely once none of its showtimes match, rather than showing up with an
-   * empty row of chips.
-   */
-  const visible = useMemo(() => {
-    return MOVIES.map(movie => ({
-      movie,
-      showtimes: movie.showtimes.filter(
-        st => st.date === dateFilter && (venueFilter === ALL_VENUES || st.venue === venueFilter)
-      )
-    })).filter(entry => entry.showtimes.length > 0);
-  }, [dateFilter, venueFilter]);
+  const venues = useVenues();
+  const showings = useShowings(date, venueId);
 
-  function pick(movie: Movie, showtime: Showtime) {
-    selectShowtime(movie, showtime);
+  /**
+   * The API returns a flat, time-ordered list of showings; the screen is a list of *movies* with
+   * their showtimes as chips. Grouping happens here because `ShowingResponse` already embeds the
+   * title, genre, rating and poster hue each card needs — the alternative would be a second
+   * request to `/movies` and a join in the browser.
+   *
+   * Showings that have already started are dropped: the backend refuses to hold a seat for one
+   * (`SHOWING_STARTED`, in both `SeatService` and `BookingService`), so offering them would be
+   * a button that can only fail. They still come back from the API because a date filter means
+   * the whole calendar day, midnight to midnight.
+   */
+  const moviesWithShowtimes = useMemo(() => {
+    const now = Date.now();
+    const byMovie = new Map<number, { movie: ShowingResponse['movie']; showings: ShowingResponse[] }>();
+
+    for (const showing of showings.data ?? []) {
+      if (new Date(showing.startTime).getTime() <= now) continue;
+      const entry = byMovie.get(showing.movie.id);
+      if (entry) entry.showings.push(showing);
+      else byMovie.set(showing.movie.id, { movie: showing.movie, showings: [showing] });
+    }
+
+    return [...byMovie.values()];
+  }, [showings.data]);
+
+  function pick(showing: ShowingResponse) {
+    selectShowing(showing);
     navigate('/seats');
   }
+
+  const selectedVenueName = venues.data?.find(venue => venue.id === venueId)?.name;
 
   return (
     <div>
@@ -45,14 +63,16 @@ export default function ShowingsPage() {
         </div>
         <div className="flex items-center gap-2.5">
           <select
-            value={venueFilter}
-            onChange={e => setVenueFilter(e.target.value)}
+            value={venueId ?? ''}
+            onChange={e => setVenueId(e.target.value === '' ? null : Number(e.target.value))}
             aria-label="Filter by venue"
             className="rounded-lg border border-line-strong bg-raised px-3 py-2 text-sm"
           >
-            <option>{ALL_VENUES}</option>
-            {VENUES.map(venue => (
-              <option key={venue}>{venue}</option>
+            <option value="">{ALL_VENUES}</option>
+            {(venues.data ?? []).map(venue => (
+              <option key={venue.id} value={venue.id}>
+                {venue.name}
+              </option>
             ))}
           </select>
           <div className="flex overflow-hidden rounded-lg border border-line-strong">
@@ -77,23 +97,31 @@ export default function ShowingsPage() {
       </div>
 
       <div className="mb-7 flex gap-2 overflow-x-auto pb-1">
-        {DATES.map(d => (
+        {days.map(day => (
           <button
-            key={d}
-            onClick={() => setDateFilter(d)}
+            key={day.value}
+            onClick={() => setDate(day.value)}
             className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold ${
-              dateFilter === d ? 'bg-accent text-accent-ink' : 'border border-line-strong bg-raised'
+              date === day.value ? 'bg-accent text-accent-ink' : 'border border-line-strong bg-raised'
             }`}
           >
-            {d}
+            {day.label}
           </button>
         ))}
       </div>
 
-      {visible.length === 0 ? (
+      {showings.isPending ? (
+        <Loading label="Loading showtimes…" />
+      ) : showings.isError ? (
+        <ErrorNotice
+          error={showings.error}
+          fallback="Could not load showtimes."
+          onRetry={() => showings.refetch()}
+        />
+      ) : moviesWithShowtimes.length === 0 ? (
         <p className="py-16 text-center text-sm text-muted">
-          Nothing showing on {dateFilter}
-          {venueFilter === ALL_VENUES ? '' : ` at ${venueFilter}`}.
+          Nothing showing on {days.find(day => day.value === date)?.label ?? date}
+          {selectedVenueName ? ` at ${selectedVenueName}` : ''}.
         </p>
       ) : (
         <div
@@ -103,7 +131,7 @@ export default function ShowingsPage() {
               : 'flex flex-col gap-3.5'
           }
         >
-          {visible.map(({ movie, showtimes }) => (
+          {moviesWithShowtimes.map(({ movie, showings: showtimes }) => (
             <div
               key={movie.id}
               className={`overflow-hidden rounded-2xl border border-line bg-surface ${
@@ -111,7 +139,7 @@ export default function ShowingsPage() {
               }`}
             >
               <div
-                style={posterGradient(movie.hue)}
+                style={posterGradient(movie.posterHue)}
                 className={`flex items-center justify-center font-mono text-xs tracking-widest text-white/50 ${
                   view === 'grid' ? 'h-32' : 'w-28 flex-shrink-0'
                 }`}
@@ -122,17 +150,23 @@ export default function ShowingsPage() {
                 <div>
                   <h3 className="text-lg font-semibold">{movie.title}</h3>
                   <p className="mt-1 text-sm text-muted">
-                    {movie.genre} · {movie.rating} · {movie.duration}
+                    {movie.genre} · {movie.rating} · {formatDuration(movie.durationMinutes)}
                   </p>
                 </div>
                 <div className="mt-3.5 flex flex-wrap gap-2">
-                  {showtimes.map(st => (
+                  {showtimes.map(showing => (
                     <button
-                      key={st.venue + st.time}
-                      onClick={() => pick(movie, st)}
+                      key={showing.id}
+                      onClick={() => pick(showing)}
+                      title={`${showing.venue.name} · ${formatTime(showing.startTime)}`}
                       className="rounded-lg border border-line-strong bg-raised px-3 py-1.5 text-xs font-semibold hover:border-accent"
                     >
-                      {st.time}
+                      {formatTime(showing.startTime)}
+                      {/* With no venue filter one movie can list the same time at two cinemas,
+                          so the venue has to be on the chip to tell them apart. */}
+                      {venueId === null && (
+                        <span className="ml-1.5 font-normal text-muted">{showing.venue.name}</span>
+                      )}
                     </button>
                   ))}
                 </div>

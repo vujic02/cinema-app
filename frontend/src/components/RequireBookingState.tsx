@@ -11,18 +11,18 @@ type Stage = 'seats' | 'checkout' | 'confirmation';
  * and a $0 total, and Confirm Purchase produced a booking out of nothing. Each stage now states
  * what it needs and sends the visitor back to the step that provides it.
  *
- * Booking state only — signing in is still cosmetic here. Real auth guards arrive with
- * AuthContext in Part 7.
+ * Booking state only. Whether the visitor is *signed in* is a separate axis — `RequireAuth`
+ * handles that, and the two compose: /checkout needs both a seat and an account.
  */
 export default function RequireBookingState({ stage }: { stage: Stage }) {
-  const { selectedShowtime, selectedSeats, confirmation } = useBooking();
+  const { selectedShowing, selectedSeats, confirmation } = useBooking();
 
   if (stage === 'confirmation') {
     return confirmation ? <Outlet /> : <Navigate to="/showings" replace />;
   }
 
-  // Both remaining stages need a showtime; without one there is nothing to seat.
-  if (!selectedShowtime) {
+  // Both remaining stages need a showing; without one there is nothing to seat.
+  if (!selectedShowing) {
     return <Navigate to="/showings" replace />;
   }
 

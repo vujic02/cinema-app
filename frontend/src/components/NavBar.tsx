@@ -1,4 +1,5 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
 /**
@@ -6,21 +7,29 @@ import { useTheme } from '../context/ThemeContext';
  * /checkout and /confirmation in the chrome as if they were places you could go — they are
  * steps in a flow, reached from the screen before them and guarded by RequireBookingState.
  */
-const LINKS = [
-  { to: '/showings', label: 'Showings' },
-  { to: '/bookings', label: 'My Bookings' },
-  { to: '/login', label: 'Log In' }
-];
+const PUBLIC_LINKS = [{ to: '/showings', label: 'Showings' }];
+const CUSTOMER_LINKS = [{ to: '/bookings', label: 'My Bookings' }];
 
 export default function NavBar() {
   const { theme, toggleTheme } = useTheme();
+  const { user, isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
   const isDark = theme === 'dark';
+
+  // My Bookings is hidden rather than shown-and-bounced: the route requires a token, so an
+  // anonymous visitor clicking it would only ever land on the login form.
+  const links = isAuthenticated ? [...PUBLIC_LINKS, ...CUSTOMER_LINKS] : PUBLIC_LINKS;
+
+  async function signOut() {
+    await logout();
+    navigate('/showings');
+  }
 
   return (
     <header className="sticky top-0 z-20 flex flex-wrap items-center gap-6 border-b border-line bg-surface px-6 py-4">
       <div className="font-bold tracking-widest text-accent-text">LUMEN</div>
       <nav className="flex flex-1 gap-1.5 overflow-x-auto">
-        {LINKS.map(link => (
+        {links.map(link => (
           <NavLink
             key={link.to}
             to={link.to}
@@ -33,7 +42,27 @@ export default function NavBar() {
             {link.label}
           </NavLink>
         ))}
+        {isAuthenticated ? (
+          <button
+            onClick={signOut}
+            className="whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold text-muted hover:text-ink"
+          >
+            Log Out
+          </button>
+        ) : (
+          <NavLink
+            to="/login"
+            className={({ isActive }) =>
+              `whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold ${
+                isActive ? 'bg-accent text-accent-ink' : 'text-muted hover:text-ink'
+              }`
+            }
+          >
+            Log In
+          </NavLink>
+        )}
       </nav>
+      {user && <span className="hidden text-sm text-muted sm:inline">{user.fullName}</span>}
       <button
         onClick={toggleTheme}
         aria-label="Toggle theme"

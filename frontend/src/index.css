@@ -32,11 +32,22 @@
     --ok: 16 185 129; /* emerald-500 */
     --ok-ink: 2 44 34; /* emerald-950 */
 
+    /* Part 7: the API answers failures with a code and a message, so there is now something to
+       show. Its own pair rather than reusing --seat-reserved, which is a seat colour that
+       happens to be red and would drag error text along with it if the seat map were retinted. */
+    --danger: 185 28 28; /* red-700 — text weight, readable on --danger-surface */
+    --danger-surface: 254 226 226; /* red-100 */
+
     /* README: "seat available: white/zinc-100 with border". The handoff shipped zinc-200 in
        light and zinc-100 in dark, which is neither, and made an available seat read as greyed
        out. The border is what separates a seat from the surface, in both themes. */
     --seat-available: 255 255 255;
-    --seat-reserved: 239 68 68; /* red-500 */
+    --seat-reserved: 239 68 68; /* red-500 — sold, gone for good */
+    /* Part 7: the API distinguishes SOLD from HELD, and the difference matters to a customer —
+       a held seat is somebody mid-checkout whose 5-minute Redis TTL may lapse, so it is worth
+       waiting on. Amber rather than a second red, so "come back in a minute" does not read as
+       "sold out". */
+    --seat-held: 245 158 11; /* amber-500 */
     --seat-selected: 16 185 129; /* emerald-500 */
     --seat-ink: 24 24 27; /* zinc-900 */
   }
@@ -60,10 +71,14 @@
     --ok: 16 185 129;
     --ok-ink: 2 44 34;
 
+    --danger: 252 165 165; /* red-300 */
+    --danger-surface: 69 10 10; /* red-950 */
+
     /* A seat stays light in dark mode — a cinema seat map reads as pale seats on a dark
        auditorium, and the seat number needs a light background to sit on either way. */
     --seat-available: 244 244 245; /* zinc-100 */
     --seat-reserved: 239 68 68;
+    --seat-held: 245 158 11;
     --seat-selected: 16 185 129;
     --seat-ink: 24 24 27;
   }

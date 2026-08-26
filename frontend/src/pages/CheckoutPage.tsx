@@ -1,14 +1,50 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { SEAT_PRICE, posterGradient } from '../data/mockData';
+import { errorCode, errorMessage } from '../api/client';
+import { useConfirmBooking } from '../api/hooks';
+import { InlineError } from '../components/QueryState';
 import { useBooking } from '../context/BookingContext';
+import { formatDayAndTime, formatMoney } from '../lib/datetime';
+import { posterGradient } from '../lib/poster';
+
+/**
+ * Codes where the seats themselves are the problem, so the only useful next step is back to the
+ * seat map. Anything else — a network blip, a 500 — leaves the holds intact and is worth
+ * retrying from here.
+ */
+const SEND_BACK_TO_SEATS = new Set(['HOLD_EXPIRED', 'SEAT_HELD', 'SEAT_SOLD', 'SHOWING_STARTED']);
 
 export default function CheckoutPage() {
-  const { selectedMovie, selectedShowtime, selectedSeats, confirmPurchase } = useBooking();
+  const { selectedShowing, selectedSeats, setConfirmation } = useBooking();
+  const confirmBooking = useConfirmBooking();
   const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+  const [seatsLost, setSeatsLost] = useState(false);
 
-  function confirm() {
-    confirmPurchase();
-    navigate('/confirmation');
+  // Guaranteed by RequireBookingState; the guards keep this from being a real branch.
+  if (!selectedShowing) return null;
+
+  const price = selectedShowing.price;
+  const labels = selectedSeats.map(seat => seat.label).sort();
+
+  async function confirm() {
+    if (!selectedShowing) return;
+    setError(null);
+    setSeatsLost(false);
+
+    try {
+      // No price and no total in the request — the server reads `showings.price` and snapshots
+      // it onto every row, so what the customer is charged is never what the client claimed.
+      const booking = await confirmBooking.mutateAsync({
+        showingId: selectedShowing.id,
+        seatIds: selectedSeats.map(seat => seat.seatId)
+      });
+      setConfirmation(booking);
+      navigate('/confirmation');
+    } catch (caught) {
+      setError(errorMessage(caught, 'Could not complete the purchase.'));
+      setSeatsLost(SEND_BACK_TO_SEATS.has(errorCode(caught) ?? ''));
+    }
   }
 
   return (
@@ -21,40 +57,53 @@ export default function CheckoutPage() {
               was silently dropped and the poster rendered as a blank box. The size is a class
               now (h-21 w-16 = 84x64), which is what the markup was reaching for anyway. */}
           <div
-            style={posterGradient(selectedMovie?.hue ?? 0)}
+            style={posterGradient(selectedShowing.movie.posterHue)}
             className="flex h-21 w-16 flex-shrink-0 items-center justify-center rounded-lg font-mono text-[8px] text-white/50"
           >
             POSTER
           </div>
           <div>
-            <h3 className="text-lg font-semibold">{selectedMovie?.title}</h3>
+            <h3 className="text-lg font-semibold">{selectedShowing.movie.title}</h3>
             <p className="mt-1.5 text-sm text-muted">
-              {selectedShowtime
-                ? `${selectedShowtime.venue} · ${selectedShowtime.date}, ${selectedShowtime.time}`
-                : ''}
+              {selectedShowing.venue.name} · {formatDayAndTime(selectedShowing.startTime)}
             </p>
           </div>
         </div>
         <div className="h-px bg-line" />
         <div className="flex justify-between text-sm">
           <span className="text-muted">Seats</span>
-          <span>{selectedSeats.join(', ')}</span>
+          <span>{labels.join(', ')}</span>
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-muted">Price per ticket</span>
-          <span>${SEAT_PRICE}</span>
+          <span>{formatMoney(price)}</span>
         </div>
         <div className="h-px bg-line" />
         <div className="flex justify-between text-lg font-bold">
           <span>Total</span>
-          <span>${selectedSeats.length * SEAT_PRICE}</span>
+          {/* The authoritative total is the one on the booking the server returns; this is the
+              same arithmetic done locally so the customer sees a number before they commit. */}
+          <span>{formatMoney(selectedSeats.length * price)}</span>
         </div>
-        <button
-          onClick={confirm}
-          className="mt-1 rounded-lg bg-accent py-3.5 text-sm font-bold text-accent-ink"
-        >
-          Confirm Purchase
-        </button>
+
+        {error && <InlineError message={error} />}
+
+        {seatsLost ? (
+          <button
+            onClick={() => navigate('/seats')}
+            className="mt-1 rounded-lg bg-accent py-3.5 text-sm font-bold text-accent-ink"
+          >
+            Back to Seat Map
+          </button>
+        ) : (
+          <button
+            onClick={confirm}
+            disabled={confirmBooking.isPending}
+            className="mt-1 rounded-lg bg-accent py-3.5 text-sm font-bold text-accent-ink disabled:cursor-not-allowed disabled:bg-sunken disabled:text-disabled"
+          >
+            {confirmBooking.isPending ? 'Confirming…' : 'Confirm Purchase'}
+          </button>
+        )}
       </div>
     </div>
   );
