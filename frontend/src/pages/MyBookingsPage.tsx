@@ -1,17 +1,29 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { posterGradient } from '../data/mockData';
+import { useMyBookings } from '../api/hooks';
+import { BookingResponse } from '../api/types';
+import { ErrorNotice, Loading } from '../components/QueryState';
 import { useBooking } from '../context/BookingContext';
-import { Booking, BookingStatus } from '../types';
+import { formatDayAndTime } from '../lib/datetime';
+import { posterGradient } from '../lib/poster';
+
+type Tab = 'upcoming' | 'past';
 
 export default function MyBookingsPage() {
-  const [tab, setTab] = useState<BookingStatus>('upcoming');
-  const { bookings, viewBooking } = useBooking();
+  const [tab, setTab] = useState<Tab>('upcoming');
+  const { setConfirmation } = useBooking();
+  const bookings = useMyBookings();
   const navigate = useNavigate();
-  const filtered = bookings.filter(b => b.status === tab);
 
-  function open(booking: Booking) {
-    viewBooking(booking);
+  /**
+   * The upcoming/past split is the server's, not a filter applied here: it is computed from
+   * `showings.start_time` against the server's clock, so both tabs agree on where "now" is even
+   * for a showing starting in the next minute.
+   */
+  const visible = bookings.data?.[tab] ?? [];
+
+  function open(booking: BookingResponse) {
+    setConfirmation(booking);
     navigate('/confirmation');
   }
 
@@ -33,45 +45,56 @@ export default function MyBookingsPage() {
         </button>
       </div>
 
-      <div className="flex flex-col gap-3.5">
-        {filtered.map(b => (
-          <div
-            key={b.id}
-            className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-line bg-surface px-5 py-4"
-          >
-            <div className="flex items-center gap-3.5">
-              <div
-                style={posterGradient(b.hue)}
-                className="flex h-16 w-12 flex-shrink-0 items-center justify-center rounded-lg font-mono text-[7px] text-white/50"
-              >
-                POSTER
+      {bookings.isPending ? (
+        <Loading label="Loading your bookings…" />
+      ) : bookings.isError ? (
+        <ErrorNotice
+          error={bookings.error}
+          fallback="Could not load your bookings."
+          onRetry={() => bookings.refetch()}
+        />
+      ) : (
+        <div className="flex flex-col gap-3.5">
+          {visible.map(booking => (
+            <div
+              key={booking.reference}
+              className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-line bg-surface px-5 py-4"
+            >
+              <div className="flex items-center gap-3.5">
+                <div
+                  style={posterGradient(booking.posterHue)}
+                  className="flex h-16 w-12 flex-shrink-0 items-center justify-center rounded-lg font-mono text-[7px] text-white/50"
+                >
+                  POSTER
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold">{booking.movieTitle}</h3>
+                  <p className="mt-1 text-sm text-muted">
+                    {booking.venueName} · {formatDayAndTime(booking.startTime)} · {booking.seats.length} seat
+                    {booking.seats.length > 1 ? 's' : ''}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-semibold">{b.movieTitle}</h3>
-                <p className="mt-1 text-sm text-muted">
-                  {b.venue} · {b.date}, {b.time} · {b.seats.length} seat{b.seats.length > 1 ? 's' : ''}
-                </p>
+              <div className="flex items-center gap-3.5">
+                <span
+                  className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                    booking.upcoming ? 'bg-ok text-ok-ink' : 'bg-sunken text-muted'
+                  }`}
+                >
+                  {booking.upcoming ? 'Upcoming' : 'Completed'}
+                </span>
+                <button
+                  onClick={() => open(booking)}
+                  className="rounded-lg border border-line-strong px-4 py-2 text-sm font-semibold"
+                >
+                  View Ticket
+                </button>
               </div>
             </div>
-            <div className="flex items-center gap-3.5">
-              <span
-                className={`rounded-full px-2.5 py-1 text-xs font-bold ${
-                  b.status === 'upcoming' ? 'bg-ok text-ok-ink' : 'bg-sunken text-muted'
-                }`}
-              >
-                {b.status === 'upcoming' ? 'Upcoming' : 'Completed'}
-              </span>
-              <button
-                onClick={() => open(b)}
-                className="rounded-lg border border-line-strong px-4 py-2 text-sm font-semibold"
-              >
-                View Ticket
-              </button>
-            </div>
-          </div>
-        ))}
-        {filtered.length === 0 && <p className="py-10 text-center text-sm text-muted">No {tab} bookings.</p>}
-      </div>
+          ))}
+          {visible.length === 0 && <p className="py-10 text-center text-sm text-muted">No {tab} bookings.</p>}
+        </div>
+      )}
     </div>
   );
 }

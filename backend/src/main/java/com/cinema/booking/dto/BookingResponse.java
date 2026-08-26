@@ -20,6 +20,7 @@ public record BookingResponse(
         String reference,
         Long showingId,
         String movieTitle,
+        int posterHue,
         String venueName,
         Instant startTime,
         List<SeatSummary> seats,
@@ -68,6 +69,9 @@ public record BookingResponse(
                 first.getBookingReference(),
                 first.getShowing().getId(),
                 first.getShowing().getMovie().getTitle(),
+                // The poster art is a gradient keyed off movies.poster_hue, same as every other
+                // DTO that carries a movie — a ticket has to draw the same poster the listing did.
+                first.getShowing().getMovie().getPosterHue(),
                 first.getShowing().getVenue().getName(),
                 first.getShowing().getStartTime(),
                 seats,
