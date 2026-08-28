@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useBooking } from '../context/BookingContext';
 import { formatDayAndTime, formatMoney } from '../lib/datetime';
-import { posterGradient } from '../lib/poster';
+import { Poster } from '../components/Poster';
 
 export default function ConfirmationPage() {
   const { confirmation } = useBooking();
@@ -28,13 +28,13 @@ export default function ConfirmationPage() {
       <div className="rounded-2xl border border-dashed border-line-strong bg-surface p-6 text-left">
         <div className="mb-4.5 flex gap-3.5">
           {/* Same duplicate-`style` defect as CheckoutPage: the gradient lost to the inline
-              size and the poster came out blank. Sized with classes now (h-19 w-14.5). */}
-          <div
-            style={posterGradient(confirmation.posterHue)}
-            className="flex h-19 w-14.5 flex-shrink-0 items-center justify-center rounded-lg font-mono text-[8px] text-white/50"
-          >
-            POSTER
-          </div>
+              size and the poster came out blank. Sized with classes now. */}
+          <Poster
+            posterUrl={confirmation.posterUrl}
+            posterHue={confirmation.posterHue}
+            title={confirmation.movieTitle}
+            className="h-21 w-14 rounded-lg text-sm"
+          />
           <div>
             <h3 className="text-lg font-semibold">{confirmation.movieTitle}</h3>
             <p className="mt-1 text-sm text-muted">

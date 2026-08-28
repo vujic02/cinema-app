@@ -62,6 +62,9 @@ public class MovieService {
         movie.setGenre(request.genre().trim());
         movie.setRating(request.rating().trim());
         movie.setPosterHue(request.posterHue());
+        // Blank and absent mean the same thing here: no artwork, fall back to the gradient.
+        String posterUrl = request.posterUrl() == null ? null : request.posterUrl().trim();
+        movie.setPosterUrl(posterUrl == null || posterUrl.isEmpty() ? null : posterUrl);
         return movie;
     }
 

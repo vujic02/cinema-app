@@ -9,7 +9,8 @@ public record MovieResponse(
         int durationMinutes,
         String genre,
         String rating,
-        int posterHue
+        int posterHue,
+        String posterUrl
 ) {
 
     public static MovieResponse from(Movie movie) {
@@ -20,6 +21,7 @@ public record MovieResponse(
                 movie.getDurationMinutes(),
                 movie.getGenre(),
                 movie.getRating(),
-                movie.getPosterHue());
+                movie.getPosterHue(),
+                movie.getPosterUrl());
     }
 }

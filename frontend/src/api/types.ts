@@ -47,7 +47,13 @@ export interface MovieResponse {
   durationMinutes: number;
   genre: string;
   rating: string;
+  /** Fallback gradient hue, painted under the artwork and shown alone when there is none. */
   posterHue: number;
+  /**
+   * TMDB artwork. Optional because the API omits null fields entirely
+   * (`default-property-inclusion: non_null`), so a movie with no poster has no key at all.
+   */
+  posterUrl?: string | null;
 }
 
 export interface VenueResponse {
@@ -70,6 +76,7 @@ export interface ShowingResponse {
     genre: string;
     rating: string;
     posterHue: number;
+    posterUrl?: string | null;
   };
   venue: { id: number; name: string };
 }
@@ -118,6 +125,7 @@ export interface BookingResponse {
   showingId: number;
   movieTitle: string;
   posterHue: number;
+  posterUrl?: string | null;
   venueName: string;
   startTime: string;
   seats: { seatId: number; label: string }[];

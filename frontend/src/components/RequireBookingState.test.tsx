@@ -27,7 +27,7 @@ const SHOWING = {
   id: 42,
   startTime: '2026-08-26T19:00:00Z',
   price: 14,
-  movie: { id: 1, title: 'Comet Line', durationMinutes: 132, genre: 'Sci-Fi', rating: 'PG-13', posterHue: 200 },
+  movie: { id: 1, title: 'Comet Line', durationMinutes: 132, genre: 'Sci-Fi', rating: 'PG-13', posterHue: 200, posterUrl: null },
   venue: { id: 3, name: 'Screen 1' }
 } satisfies ShowingResponse;
 

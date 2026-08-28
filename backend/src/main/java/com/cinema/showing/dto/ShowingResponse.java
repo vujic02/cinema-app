@@ -6,7 +6,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
- * Carries the movie fields the showings list renders (title, rating, poster hue) so the UI does
+ * Carries the movie fields the showings list renders (title, rating, artwork) so the UI does
  * not have to fetch each movie separately.
  */
 public record ShowingResponse(
@@ -17,7 +17,8 @@ public record ShowingResponse(
         VenueSummary venue
 ) {
 
-    public record MovieSummary(Long id, String title, int durationMinutes, String genre, String rating, int posterHue) {
+    public record MovieSummary(Long id, String title, int durationMinutes, String genre, String rating,
+                               int posterHue, String posterUrl) {
     }
 
     public record VenueSummary(Long id, String name) {
@@ -35,7 +36,8 @@ public record ShowingResponse(
                         showing.getMovie().getDurationMinutes(),
                         showing.getMovie().getGenre(),
                         showing.getMovie().getRating(),
-                        showing.getMovie().getPosterHue()),
+                        showing.getMovie().getPosterHue(),
+                        showing.getMovie().getPosterUrl()),
                 new VenueSummary(showing.getVenue().getId(), showing.getVenue().getName()));
     }
 }

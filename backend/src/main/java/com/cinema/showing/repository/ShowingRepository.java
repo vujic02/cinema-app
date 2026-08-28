@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.lang.Nullable;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -57,6 +58,32 @@ public interface ShowingRepository extends JpaRepository<Showing, Long>, JpaSpec
 
     /** The {@code uq_showings_venue_start} check, tolerant of a showing keeping its own slot. */
     boolean existsByVenueIdAndStartTimeAndIdNot(Long venueId, Instant startTime, Long id);
+
+    /**
+     * Showings still to come that nobody has bought a seat for.
+     *
+     * <p>What the TMDB import clears before laying down a new schedule. The {@code not exists} is
+     * the whole point: {@code fk_bookings_showing} has no cascade, so a showing with a sale
+     * against it cannot be deleted — and should not be, because it is somebody's ticket.
+     */
+    @Query("""
+            select s from Showing s
+            where s.startTime > :from
+              and not exists (select 1 from Booking b where b.showing = s)
+            """)
+    List<Showing> findUpcomingWithoutBookings(@Param("from") Instant from);
+
+    /**
+     * What this venue last charged, so imported showings inherit its established pricing rather
+     * than a constant invented inside the importer.
+     */
+    @Query("""
+            select s.price from Showing s
+            where s.venue.id = :venueId
+            order by s.startTime desc
+            limit 1
+            """)
+    Optional<BigDecimal> findLatestPriceForVenue(@Param("venueId") Long venueId);
 
     /**
      * Specification-driven reads still need {@code movie} and {@code venue} eagerly, and a

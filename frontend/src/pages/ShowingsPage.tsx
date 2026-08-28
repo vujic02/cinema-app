@@ -5,7 +5,7 @@ import { ShowingResponse } from '../api/types';
 import { ErrorNotice, Loading } from '../components/QueryState';
 import { useBooking } from '../context/BookingContext';
 import { dayChips, formatDuration, formatTime } from '../lib/datetime';
-import { posterGradient } from '../lib/poster';
+import { Poster } from '../components/Poster';
 
 const ALL_VENUES = 'All venues';
 
@@ -138,14 +138,15 @@ export default function ShowingsPage() {
                 view === 'grid' ? 'flex flex-col' : 'flex flex-row'
               }`}
             >
-              <div
-                style={posterGradient(movie.posterHue)}
-                className={`flex items-center justify-center font-mono text-xs tracking-widest text-white/50 ${
-                  view === 'grid' ? 'h-32' : 'w-28 flex-shrink-0'
-                }`}
-              >
-                POSTER
-              </div>
+              {/* Grid cards give the artwork a real 2:3 poster frame. The handoff used a 128px
+                  banner, which was the right shape for a gradient and the wrong one for a poster:
+                  it cropped every face off the top of the image. */}
+              <Poster
+                posterUrl={movie.posterUrl}
+                posterHue={movie.posterHue}
+                title={movie.title}
+                className={view === 'grid' ? 'aspect-[2/3] w-full text-lg' : 'w-24 self-stretch text-base'}
+              />
               <div className="flex flex-1 flex-col justify-between p-4">
                 <div>
                   <h3 className="text-lg font-semibold">{movie.title}</h3>

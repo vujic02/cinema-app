@@ -5,7 +5,7 @@ import { BookingResponse } from '../api/types';
 import { ErrorNotice, Loading } from '../components/QueryState';
 import { useBooking } from '../context/BookingContext';
 import { formatDayAndTime } from '../lib/datetime';
-import { posterGradient } from '../lib/poster';
+import { Poster } from '../components/Poster';
 
 type Tab = 'upcoming' | 'past';
 
@@ -61,12 +61,12 @@ export default function MyBookingsPage() {
               className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-line bg-surface px-5 py-4"
             >
               <div className="flex items-center gap-3.5">
-                <div
-                  style={posterGradient(booking.posterHue)}
-                  className="flex h-16 w-12 flex-shrink-0 items-center justify-center rounded-lg font-mono text-[7px] text-white/50"
-                >
-                  POSTER
-                </div>
+                <Poster
+                  posterUrl={booking.posterUrl}
+                  posterHue={booking.posterHue}
+                  title={booking.movieTitle}
+                  className="h-18 w-12 rounded-lg text-xs"
+                />
                 <div>
                   <h3 className="text-base font-semibold">{booking.movieTitle}</h3>
                   <p className="mt-1 text-sm text-muted">

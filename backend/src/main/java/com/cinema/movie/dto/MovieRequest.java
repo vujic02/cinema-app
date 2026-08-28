@@ -9,7 +9,10 @@ import jakarta.validation.constraints.Size;
  * Bounds mirror the column definitions and CHECK constraints in the initial migration, so a bad
  * payload fails as a 400 with field errors rather than as a 409 from the database.
  *
- * @param posterHue 0–359, drives the placeholder poster gradient in the UI
+ * @param posterHue 0–359, drives the poster gradient shown while the artwork loads, and the
+ *                  whole poster where there is none
+ * @param posterUrl optional artwork URL. The TMDB importer fills this in; a movie added by hand
+ *                  may leave it out and fall back to the gradient
  */
 public record MovieRequest(
 
@@ -34,6 +37,9 @@ public record MovieRequest(
 
         @Min(0)
         @Max(359)
-        int posterHue
+        int posterHue,
+
+        @Size(max = 500)
+        String posterUrl
 ) {
 }

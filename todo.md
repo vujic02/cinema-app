@@ -631,6 +631,112 @@ Edge paths a happy-path run cannot reach:
 - [ ] Hold countdown timer with expiry warning, auto-release on unmount/navigate-away
 - [ ] Rejected-hold path: seat taken mid-click → revert + inline message
 
+## Extra — real catalogue from TMDB (out of band, requested mid-Part-8)
+
+The seeded five movies were placeholders with a gradient where a poster should be. The listing
+now comes from themoviedb.org's weekly trending chart, with real artwork.
+
+**Why the import lives on the backend and not in the browser:** showings carry a foreign key to
+`movies`, so a movie the frontend fetched for itself could never be scheduled, and calling TMDB
+from the page would mean either shipping the API key to the browser or introducing the CORS the
+whole `/api` same-origin design (TECH.md §4) exists to avoid.
+
+- [x] **`V20260827_140000__movie_artwork.sql`** — `movies.poster_url` and a nullable-unique
+      `movies.tmdb_id`
+      - `poster_hue` **stays**. The initial schema called it "the placeholder until real artwork
+        exists"; it turns out to still be load-bearing as what fills the frame while a 500px JPEG
+        crosses the network, and as the whole poster for a movie added by hand through the admin
+        API. It is painted under the image rather than replaced by it
+      - `tmdb_id` is nullable so the seeded and hand-entered movies are not forced to invent an
+        identity, and unique so a re-import updates rather than duplicates (MySQL allows any
+        number of NULLs in a UNIQUE index)
+- [x] **`catalog/tmdb/TmdbClient`** — the only class that talks to themoviedb.org
+      - **works out its own auth style.** TMDB's settings page offers a v3 API key *and* a v4
+        read access token and does not make clear they authenticate differently; the shape of the
+        value decides (a v4 token is a JWT → `Authorization: Bearer`, a v3 key → `api_key=`)
+      - `/trending/movie/week` rather than `/movie/popular`: popular is dominated by the same
+        evergreen blockbusters, trending actually turns over
+      - `append_to_response=release_dates` folds the certification sub-resource into the detail
+        call, halving the round trips an import makes
+      - 5s connect / 15s read timeouts, because a third party on the public internet must not pin
+        a request thread, and every failure becomes a coded `ApiException` — `TMDB_UNAUTHORIZED`,
+        `TMDB_RATE_LIMITED`, `TMDB_UNAVAILABLE`, `TMDB_NOT_CONFIGURED` — rather than a 500
+- [x] **`catalog/service/MovieImportService`** — the mapping, and the schedule that makes it
+      visible
+      - **a movie with no showing is invisible.** The customer flow is driven entirely by
+        `GET /showings?date=`, so an import that only wrote `movies` rows would look like it had
+        done nothing. Importing and scheduling are one operation
+      - **walks the chart rather than slicing it.** An entry can be unusable — announced but
+        unreleased, so no runtime, or no artwork — and stopping at the first ten would quietly
+        deliver eight
+      - certification falls back to `NR` (the column is NOT NULL and TMDB has none for a film not
+        yet rated in the region); genre falls back to `Feature`
+      - `posterHue` is derived as `tmdbId * 137 mod 360` — stable across re-imports, and 137 being
+        coprime with 360 keeps neighbouring ids from landing in a run of near-identical blues
+      - **new showings inherit the venue's own established price** (`findLatestPriceForVenue`)
+        rather than a constant invented in the importer, so the IMAX stays dearer than the
+        multiplex
+      - slots already in the past are skipped: `SeatService` and `BookingService` both refuse a
+        started showing, so scheduling one creates a listing entry that can only fail
+- [x] **Nothing is destroyed.** `fk_showings_movie` and `fk_bookings_showing` have no cascade, and
+      a sold ticket is not the importer's to delete. Only *upcoming* showings with **no bookings**
+      are cleared, via a `not exists` subquery — seeded movies keep their rows, their past
+      showings and every booking against them, and My Bookings history is untouched.
+- [x] **`POST /api/admin/catalog/import-featured?limit&days&replaceUpcoming`** — admin-only, and
+      **explicitly triggered**. Not on a schedule and not at startup: it is the one operation that
+      reaches out to a third party, and a boot that silently depends on a public API being up (and
+      a key being set) is a boot that fails in CI for reasons nothing in the codebase explains.
+      No key configured → `503 TMDB_NOT_CONFIGURED`, which is why the whole suite still runs
+      offline.
+- [x] **`posterUrl` added to the three DTOs that carry a movie** — `MovieResponse`,
+      `ShowingResponse.MovieSummary` and `BookingResponse`. `MovieRequest` gained it too, so Part 9's
+      admin form can set artwork by hand.
+- [x] **Frontend `components/Poster.tsx`** — artwork over the gradient
+      - the gradient is *always* the element's background and the image sits on top, so there is
+        no loading flash to manage and no layout shift; a failed image simply reveals what was
+        already behind it
+      - `onError` falls back, and the failure state **resets per URL** — lists recycle the same
+        component for different movies, and without that one dead image would leave every later
+        card in that slot showing the placeholder
+      - grid cards moved to a real `aspect-[2/3]` poster frame. The handoff's 128px banner was the
+        right shape for a gradient and the wrong one for a poster: it cropped the faces off
+- [x] **Tests: backend 145** (was 129, +16), **frontend 67** (was 61, +6)
+      - `catalog/TmdbMovieTest` (6) — the two bits of TMDB's payload that need interpreting:
+        certification is nested three deep by territory *and* release type with most entries
+        carrying `""` rather than being absent, so "first non-blank in region" is the rule
+      - `catalog/CatalogImportIntegrationTest` (10) — TMDB mocked at the client seam, so the suite
+        stays offline. Covers the mapping, idempotent re-run, **booked showings surviving a
+        replace**, `replaceUpcoming=false`, the chart-walk past unusable entries, one movie 404ing
+        without losing the run, an auth failure aborting instead of skipping every movie in turn,
+        admin-only access, and argument bounds. `@Transactional` (unlike the rest of the suite)
+        because these tests genuinely conflict: the import is idempotent by `tmdb_id` and skips a
+        venue slot already busy, so without rollback "created 3" means something different in the
+        second method than the first
+      - `components/Poster.test.tsx` (6) — artwork, no artwork, **an absent field**, a failed
+        load, the gradient being identical either way, and the retry after a previous movie's
+        image failed
+
+### Extra — deviations / notes
+
+- **Apple's movies RSS feed was the no-key candidate and it is retired** (404; only apps, music
+  and books remain), and the iTunes Search API has no featured/top-10 concept at all. TMDB needs
+  a free key, which is why the import is configuration-driven rather than hardcoded.
+- **`posterUrl` arrives absent, not null.** `default-property-inclusion: non_null` is app-wide
+  (it is what hides `customer` on a customer's own booking), so a movie with no artwork has no
+  `posterUrl` key at all. The first cut of `Poster` guarded with `posterUrl !== null`, which
+  `undefined` sails straight past: every card rendered an `<img>` with no `src` — a permanently
+  broken frame that never fires `onError`, so the gradient fallback never got its turn. The guard
+  is truthiness now and the TS types say `posterUrl?:` to match the wire. Caught in the browser;
+  the unit tests had only ever been handed an explicit `null`.
+- **`TMDB_NOT_CONFIGURED` was found by running the app, not by the tests** — the integration test
+  mocks `TmdbClient`, so `requireConfigured()` never fires in it. A stale backend process was
+  also masking the new controller behind a `NoResourceFoundException`; both were caught by curling
+  the real endpoint.
+- Poster images load from `image.tmdb.org`, the first third-party origin the page talks to. Fine
+  today (no CSP is set); worth an explicit `img-src` allowance whenever one is added in Part 10.
+- The importer schedules 4 slots × every venue × N days, rotating the movie so the same film is
+  not always the 19:30. With 3 venues and 5 days that is ~60 showings for 10 movies.
+
 ## Part 9 — Admin frontend
 
 Designed fresh against the Part 6 tokens (`surface`, `line`, `accent`, `muted`, …) rather than

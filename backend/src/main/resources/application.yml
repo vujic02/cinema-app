@@ -81,6 +81,19 @@ app:
     # Per user, per showing. Without a cap one caller can hold a whole auditorium for the full
     # TTL and lock everyone else out; 10 is comfortably above a real group booking.
     max-seats-per-user: 10
+  tmdb:
+    # Unset by default. Nothing calls TMDB until an admin POSTs to
+    # /api/admin/catalog/import-featured, so a missing key costs nothing at startup and keeps
+    # the test suite offline; that one endpoint answers 503 TMDB_NOT_CONFIGURED instead.
+    # Accepts either a v3 API key or a v4 read access token - the client works out which.
+    api-key: ${TMDB_API_KEY:}
+    base-url: https://api.themoviedb.org/3
+    image-base-url: https://image.tmdb.org/t/p/
+    poster-size: w500
+    language: en-US
+    # Which country's certification counts as "the rating" (PG-13, R, ...). TMDB carries one per
+    # release territory and they disagree.
+    region: US
   jwt:
     issuer: lumen-cinema
     access-token-ttl-minutes: 15

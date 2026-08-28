@@ -5,7 +5,7 @@ import { useConfirmBooking } from '../api/hooks';
 import { InlineError } from '../components/QueryState';
 import { useBooking } from '../context/BookingContext';
 import { formatDayAndTime, formatMoney } from '../lib/datetime';
-import { posterGradient } from '../lib/poster';
+import { Poster } from '../components/Poster';
 
 /**
  * Codes where the seats themselves are the problem, so the only useful next step is back to the
@@ -53,15 +53,15 @@ export default function CheckoutPage() {
       <div className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6">
         <div className="flex gap-4">
           {/* The handoff put `style={posterGradient(...)}` and `style={{ width, height }}` on
-              this one element. JSX keeps only the last of a repeated attribute, so the gradient
-              was silently dropped and the poster rendered as a blank box. The size is a class
-              now (h-21 w-16 = 84x64), which is what the markup was reaching for anyway. */}
-          <div
-            style={posterGradient(selectedShowing.movie.posterHue)}
-            className="flex h-21 w-16 flex-shrink-0 items-center justify-center rounded-lg font-mono text-[8px] text-white/50"
-          >
-            POSTER
-          </div>
+              one element here. JSX keeps only the last of a repeated attribute, so the gradient
+              was silently dropped and the poster rendered as a blank box. Sizing lives in a
+              class now, which is what the markup was reaching for anyway. */}
+          <Poster
+            posterUrl={selectedShowing.movie.posterUrl}
+            posterHue={selectedShowing.movie.posterHue}
+            title={selectedShowing.movie.title}
+            className="h-24 w-16 rounded-lg text-sm"
+          />
           <div>
             <h3 className="text-lg font-semibold">{selectedShowing.movie.title}</h3>
             <p className="mt-1.5 text-sm text-muted">
